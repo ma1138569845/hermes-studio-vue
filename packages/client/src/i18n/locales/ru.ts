@@ -1645,7 +1645,7 @@ export default {
     style: 'Стиль',
     styleHint: 'Выберите характер интерфейса',
     styleInk: 'Тушь',
-    styleComic: 'Комикс',
+    styleFormal: 'Формальный',
     fontSize: 'Размер текста',
     fontSizeHint: 'Базовый размер текста интерфейса и диалогов',
     textColor: 'Цвет текста',

@@ -1884,7 +1884,7 @@ export default {
     style: 'Style',
     styleHint: 'Choose the interface character',
     styleInk: 'Ink',
-    styleComic: 'Comic',
+    styleFormal: 'Formal',
     fontSize: 'Text size',
     fontSizeHint: 'Base interface and conversation text size',
     textColor: 'Text color',

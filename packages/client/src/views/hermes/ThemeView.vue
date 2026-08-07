@@ -49,7 +49,7 @@ const brightnessOptions = computed(() => [
 ])
 const styleOptions = computed(() => [
   { label: t('theme.styleInk'), value: 'ink' },
-  { label: t('theme.styleComic'), value: 'comic' },
+  { label: t('theme.styleFormal'), value: 'formal' },
 ])
 const resolvedTextColor = computed(() =>
   textColor.value || (isDark.value ? '#e0e0e0' : '#1a1a1a'),

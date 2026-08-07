@@ -18,7 +18,7 @@ import {
 } from '@/styles/theme-customization'
 
 export type BrightnessMode = 'light' | 'dark' | 'system'
-export type ThemeStyle = 'ink' | 'comic'
+export type ThemeStyle = 'ink' | 'formal'
 
 const BRIGHTNESS_KEY = 'hermes_brightness'
 const STYLE_KEY = 'hermes_style'
@@ -87,11 +87,11 @@ function loadCachedTheme(userId: number | null): UserThemeSettings {
 const brightness = ref<BrightnessMode>(
   (localStorage.getItem(BRIGHTNESS_KEY) as BrightnessMode) || 'system',
 )
-const style = ref<ThemeStyle>(
-  (localStorage.getItem(STYLE_KEY) as ThemeStyle) || 'ink',
-)
+// Migrate legacy 'comic' style to 'formal' for users upgrading from older versions.
+const storedStyle = (localStorage.getItem(STYLE_KEY) as ThemeStyle) || 'ink'
+const style = ref<ThemeStyle>(storedStyle === 'comic' ? 'formal' : storedStyle)
 const isDark = ref(false)
-const isComic = ref(false)
+const isFormal = ref(false)
 const activeUserId = ref<number | null>(storedUserId())
 const serverTheme = ref<UserThemeSettings>(loadCachedTheme(activeUserId.value))
 let committedTheme = serverTheme.value
@@ -140,9 +140,9 @@ function applyCustomization() {
 function applyClasses() {
   const dark = resolveDark(brightness.value)
   isDark.value = dark
-  isComic.value = style.value === 'comic'
+  isFormal.value = style.value === 'formal'
   document.documentElement.classList.toggle('dark', dark)
-  document.documentElement.classList.toggle('comic', isComic.value)
+  document.documentElement.classList.toggle('formal', isFormal.value)
   applyCustomization()
 }
 
@@ -277,7 +277,7 @@ watch(hasBackgroundImage, (active) => {
 export function useTheme() {
   const themeName = computed(() => {
     const mode = isDark.value ? 'dark' : 'light'
-    return isComic.value ? `comic-${mode}` : mode
+    return isFormal.value ? `formal-${mode}` : mode
   })
 
   function setBrightness(mode: BrightnessMode) {
@@ -293,14 +293,14 @@ export function useTheme() {
   }
 
   function toggleStyle() {
-    style.value = isComic.value ? 'ink' : 'comic'
+    style.value = isFormal.value ? 'ink' : 'formal'
   }
 
   return {
     brightness,
     style,
     isDark,
-    isComic,
+    isFormal,
     themeName,
     customization,
     fontSize: computed(() => serverTheme.value.fontSize),

@@ -107,15 +107,15 @@
         const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
         const isDark = brightness === 'dark' || (brightness === 'system' && prefersDark);
 
-        // Resolve comic style
-        const isComic = style === 'comic';
+        // Resolve formal style — migrate legacy 'comic' to 'formal'
+        const isFormal = style === 'comic' || style === 'formal';
 
         // Apply classes immediately
         if (isDark) {
           document.documentElement.classList.add('dark');
         }
-        if (isComic) {
-          document.documentElement.classList.add('comic');
+        if (isFormal) {
+          document.documentElement.classList.add('formal');
         }
 
         const desktop = window.hermesDesktop;

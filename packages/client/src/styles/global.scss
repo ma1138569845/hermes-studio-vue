@@ -1,54 +1,6 @@
 @use 'variables' as *;
 @use 'code-block';
 
-@font-face {
-  font-family: 'Comic Neue';
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url('/fonts/ComicNeue-Bold.ttf') format('truetype');
-}
-
-@font-face {
-  font-family: 'ZCOOL KuaiLe';
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url('/fonts/ZCOOLKuaiLe-Regular.ttf') format('truetype');
-}
-
-@font-face {
-  font-family: 'Zen Maru Gothic';
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url('/fonts/ZenMaruGothic-Regular.ttf') format('truetype');
-}
-
-@font-face {
-  font-family: 'Zen Maru Gothic';
-  font-style: normal;
-  font-weight: 700;
-  font-display: swap;
-  src: url('/fonts/ZenMaruGothic-Bold.ttf') format('truetype');
-}
-
-@font-face {
-  font-family: 'Gaegu';
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url('/fonts/Gaegu-Regular.ttf') format('truetype');
-}
-
-@font-face {
-  font-family: 'Gaegu';
-  font-style: normal;
-  font-weight: 700;
-  font-display: swap;
-  src: url('/fonts/Gaegu-Bold.ttf') format('truetype');
-}
-
 *,
 *::before,
 *::after {

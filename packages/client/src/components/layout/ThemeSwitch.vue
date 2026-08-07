@@ -1,15 +1,16 @@
 <script setup lang="ts">
 import { useTheme } from '@/composables/useTheme'
 
-const { isDark, isComic, toggleBrightness, toggleStyle } = useTheme()
+const { isDark, isFormal, toggleBrightness, toggleStyle } = useTheme()
 </script>
 
 <template>
   <div class="theme-switch-container" style="display: flex; gap: 4px; align-items: center;">
-    <button class="theme-switch" :title="isComic ? 'Ink style' : 'Comic style'" @click="toggleStyle">
-      <!-- Palette icon for comic toggle -->
-      <svg v-if="isComic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z" />
+    <button class="theme-switch" :title="isFormal ? 'Ink style' : 'Formal style'" @click="toggleStyle">
+      <!-- Briefcase icon for formal toggle -->
+      <svg v-if="isFormal" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="2" y="7" width="20" height="14" rx="2" />
+        <path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2" />
       </svg>
       <!-- Sparkle icon for ink mode -->
       <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">

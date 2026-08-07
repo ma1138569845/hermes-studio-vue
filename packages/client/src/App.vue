@@ -22,7 +22,7 @@ const WebPet = defineAsyncComponent(async () => (await import('@/components/herm
 
 const {
   isDark,
-  isComic,
+  isFormal,
   customization,
   hasBackgroundImage,
   syncThemeFromServer,
@@ -35,7 +35,7 @@ const route = useRoute()
 const { sessionSearchOpen } = useSessionSearch()
 
 const themeOverrides = computed(() =>
-  getThemeOverrides(isDark.value, isComic.value, customization.value),
+  getThemeOverrides(isDark.value, isFormal.value, customization.value),
 )
 const naiveTheme = computed(() => isDark.value ? darkTheme : null)
 

@@ -1442,7 +1442,7 @@ export default {
     style: '스타일',
     styleHint: '인터페이스 분위기 선택',
     styleInk: '수묵',
-    styleComic: '코믹',
+    styleFormal: '포멀',
     fontSize: '텍스트 크기',
     fontSizeHint: '인터페이스와 대화의 기본 텍스트 크기',
     textColor: '텍스트 색상',

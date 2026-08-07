@@ -168,16 +168,16 @@ export const darkThemeOverrides: GlobalThemeOverrides = {
 
 export function getThemeOverrides(
   isDark: boolean,
-  isComic?: boolean,
+  isFormal?: boolean,
   customization?: ThemeCustomization,
 ): GlobalThemeOverrides {
   const base = isDark ? darkThemeOverrides : lightThemeOverrides
-  if (!isComic && !customization) return base
-  const comicFont = "'Comic Neue', 'ZCOOL KuaiLe', 'Zen Maru Gothic', 'Gaegu', cursive, sans-serif"
+  if (!isFormal && !customization) return base
+  const formalFont = "'Noto Sans SC', 'Source Han Sans CN', 'PingFang SC', 'Microsoft YaHei', 'Hiragino Sans GB', sans-serif"
   const custom = customization ? resolveThemeCustomization(customization, isDark) : null
   const common = {
     ...base.common!,
-    ...(isComic ? { fontFamily: comicFont } : {}),
+    ...(isFormal ? { fontFamily: formalFont } : {}),
     ...(custom ? {
       fontSize: `${custom.fontSize}px`,
       fontSizeMedium: `${custom.fontSize}px`,

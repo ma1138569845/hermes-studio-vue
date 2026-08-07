@@ -14,8 +14,8 @@ const savedStyle = localStorage.getItem('hermes_style') || 'ink'
 const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
 const isDark = savedBrightness === 'dark' || (savedBrightness === 'system' && prefersDark)
 
-// Resolve style
-const isComic = savedStyle === 'comic'
+// Resolve style — migrate legacy 'comic' to 'formal'
+const isFormal = savedStyle === 'comic' || savedStyle === 'formal'
 const bridge = desktopBridge()
 const isDesktopShell = bridge?.isDesktop === true
 const isDesktopPetWindow = bridge?.windowKind === 'pet' || window.location.hash.startsWith('#/desktop-pet')
@@ -24,8 +24,8 @@ const isDesktopPetWindow = bridge?.windowKind === 'pet' || window.location.hash.
 if (isDark) {
   document.documentElement.classList.add('dark')
 }
-if (isComic) {
-  document.documentElement.classList.add('comic')
+if (isFormal) {
+  document.documentElement.classList.add('formal')
 }
 if (isDesktopShell) {
   document.documentElement.classList.add('hermes-desktop-shell')

@@ -1442,7 +1442,7 @@ export default {
     style: 'スタイル',
     styleHint: '画面の雰囲気を選択',
     styleInk: '墨',
-    styleComic: 'コミック',
+    styleFormal: 'フォーマル',
     fontSize: '文字サイズ',
     fontSizeHint: '画面と会話テキストの基本サイズ',
     textColor: '文字色',

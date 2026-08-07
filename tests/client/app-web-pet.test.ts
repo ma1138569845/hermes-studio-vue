@@ -36,7 +36,7 @@ vi.mock('vue-i18n', () => ({
 vi.mock('@/composables/useTheme', () => ({
   useTheme: () => ({
     isDark: false,
-    isComic: false,
+    isFormal: false,
     customization: { value: { fontSize: 14, textColor: null, accentColor: null } },
     hasBackgroundImage: false,
     syncThemeFromServer: vi.fn().mockResolvedValue(undefined),

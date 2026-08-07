@@ -1884,7 +1884,7 @@ export default {
     style: 'النمط',
     styleHint: 'اختر طابع الواجهة',
     styleInk: 'حبري',
-    styleComic: 'كوميك',
+    styleFormal: 'رسمي',
     fontSize: 'حجم النص',
     fontSizeHint: 'حجم النص الأساسي في الواجهة والمحادثة',
     textColor: 'لون النص',

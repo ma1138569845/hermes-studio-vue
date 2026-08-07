@@ -1833,7 +1833,7 @@ export default {
     style: '風格',
     styleHint: '選擇介面的視覺風格',
     styleInk: '水墨',
-    styleComic: '漫畫',
+    styleFormal: '正式',
     fontSize: '文字大小',
     fontSizeHint: '介面與對話內容的基礎字級',
     textColor: '文字顏色',

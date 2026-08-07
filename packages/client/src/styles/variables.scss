@@ -128,25 +128,25 @@
   --accent-info-rgb: 107, 163, 214;
 }
 
-.comic {
-  // Borders — bold comic outlines
-  --border-color: #1a1a1a;
-  --border-light: #555555;
-  --msg-system-border: #1a1a1a;
+.formal {
+  // Formal business style — subtle borders, no hard outlines
+  --border-color: #e5e8ec;
+  --border-light: #eef1f4;
+  --msg-system-border: #c9d2dc;
 
-  // Comic-specific
-  --font-ui: 'Comic Neue', 'ZCOOL KuaiLe', 'Zen Maru Gothic', 'Gaegu', cursive, sans-serif;
-  --comic-border-width: 2.5px;
-  --comic-shadow: 3px 3px 0px rgba(0, 0, 0, 0.15);
+  // Formal-specific typography
+  --font-ui: 'Noto Sans SC', 'Source Han Sans CN', 'PingFang SC', 'Microsoft YaHei', 'Hiragino Sans GB', sans-serif;
+  --comic-border-width: 1px;
+  --comic-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
 }
 
-.dark.comic {
-  // Borders — brighter outlines on dark
-  --border-color: #666666;
-  --border-light: #555555;
-  --msg-system-border: #888888;
+.dark.formal {
+  // Brighter borders on dark for legibility
+  --border-color: #333a45;
+  --border-light: #2b313a;
+  --msg-system-border: #4a5260;
 
-  --comic-shadow: 3px 3px 0px rgba(255, 255, 255, 0.08);
+  --comic-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
 }
 
 // ─── SCSS Variables (delegate to CSS custom properties) ────────
