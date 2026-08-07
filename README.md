@@ -1,5 +1,5 @@
 <p align="center">
-  <strong>Hermes Studio</strong>
+  <strong>DechnicAuditor</strong>
   <a href="./README_zh.md">中文</a>
 </p>
 
@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/EKKOLearnAI/hermes-studio/releases/latest">Download Hermes Studio Desktop</a>
+  <a href="https://github.com/EKKOLearnAI/hermes-studio/releases/latest">Download DechnicAuditor Desktop</a>
   ·
   <a href="https://hermes-studio.ai/#/docs/getting-started">Documentation</a>
   ·
@@ -29,7 +29,7 @@
 
 ## Core Capabilities
 
-| Area | What Hermes Studio does |
+| Area | What DechnicAuditor does |
 | --- | --- |
 | Agent chat | Runs Hermes Agent conversations with streaming responses, tool traces, generated-file previews, persistent local sessions, and standalone desktop chat windows. |
 | Local control plane | Manages profiles, providers, models, credentials, memory, skills, plugins, logs, and runtime settings from one dashboard. |
@@ -235,10 +235,10 @@ hermes-web-ui reset-default-login
 ### Desktop App & Updates
 
 - Native Electron shell for Windows, macOS, and Linux
-- Bundles the Web UI runtime and starts the local Hermes Studio server automatically
+- Bundles the Web UI runtime and starts the local DechnicAuditor server automatically
 - Uses Cloudflare download endpoints for desktop auto-update metadata and assets first
 - Falls back to GitHub Releases `latest` assets if the Cloudflare update feed is unavailable
-- Windows upgrades attempt to close an existing Hermes Studio process before replacing files
+- Windows upgrades attempt to close an existing DechnicAuditor process before replacing files
 
 ---
 
@@ -246,7 +246,7 @@ hermes-web-ui reset-default-login
 
 ### Desktop App (Recommended)
 
-Download the latest **Hermes Studio** desktop installer from
+Download the latest **DechnicAuditor** desktop installer from
 [GitHub Releases](https://github.com/EKKOLearnAI/hermes-studio/releases/latest).
 
 Desktop builds are published for macOS, Windows, and Linux, with separate
@@ -264,7 +264,7 @@ desktop app, bundled Hermes Agent CLI, and bundled Web UI CLI do not conflict:
 
 | Command | Description |
 | --- | --- |
-| `hermes-studio` | Open the Hermes Studio desktop app |
+| `hermes-studio` | Open the DechnicAuditor desktop app |
 | `hermes-studio cli ...` | Run the bundled Hermes Agent CLI |
 | `hermes-studio web ...` | Run the bundled `hermes-web-ui` command |
 | `hermes-studio -h` | Show wrapper help |
@@ -456,6 +456,6 @@ The BFF layer handles Socket.IO chat streaming, the Hermes agent bridge, profile
 
 [BSL-1.1](./LICENSE)
 
-The license covers Hermes Studio, the former Hermes Web UI name, the
+The license covers DechnicAuditor, the former Hermes Web UI name, the
 `hermes-web-ui` npm package and CLI, desktop applications, firmware, release
 artifacts, documentation, and associated files in this repository.

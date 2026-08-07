@@ -27,7 +27,7 @@ each file first.
   CSV.
 - Preserve download as a fallback for unsupported, oversized, malformed, or
   encrypted files.
-- Keep document contents local to Hermes Studio; do not upload files to an
+- Keep document contents local to DechnicAuditor; do not upload files to an
   external preview service.
 - Apply explicit size and rendering limits so previews cannot freeze the UI or
   exhaust server memory.
@@ -37,7 +37,7 @@ each file first.
 - Do not execute macros, embedded scripts, or active document content.
 - Do not provide pixel-perfect Microsoft Office editing.
 - Do not initially preview legacy binary Office formats such as DOC and XLS.
-- Do not allow generated HTML to access Hermes Studio APIs, authentication
+- Do not allow generated HTML to access DechnicAuditor APIs, authentication
   state, the parent page, local files, or unrestricted network resources.
 
 ## Current Constraints
@@ -177,7 +177,7 @@ delimiter and quoting behavior.
   checks for every preview request.
 - Set `X-Content-Type-Options: nosniff` and return an allowlisted MIME derived
   from the normalized file extension.
-- Never insert generated HTML into the Hermes Studio document with `v-html`.
+- Never insert generated HTML into the DechnicAuditor document with `v-html`.
 - Never grant generated HTML a same-origin, script-capable iframe.
 - Do not resolve arbitrary absolute paths or URLs referenced by documents.
 - Do not execute spreadsheet formulas, Office macros, embedded JavaScript, or
@@ -232,7 +232,7 @@ delimiter and quoting behavior.
   page.
 - Preview the same formats from a chat session workspace drawer.
 - Verify malicious HTML cannot run script, navigate the parent, submit forms,
-  or call Hermes Studio APIs.
+  or call DechnicAuditor APIs.
 - Verify large and malformed documents fail gracefully without blocking the
   rest of the UI.
 
@@ -252,7 +252,7 @@ delimiter and quoting behavior.
   without first downloading the file.
 - The behavior works from both profile files and session workspace files.
 - Text source/edit behavior remains available where appropriate.
-- No preview format can execute active content or access Hermes Studio session
+- No preview format can execute active content or access DechnicAuditor session
   credentials.
 - Oversized, malformed, encrypted, or unsupported files fail with an explicit
   message and usable download fallback.

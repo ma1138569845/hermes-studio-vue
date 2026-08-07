@@ -319,7 +319,7 @@ describe('hermes-web-ui MCP server', () => {
     expect(stdout.trim()).toBe(`hermes-studio-mcp v${pkg.version}`)
   })
 
-  it('exposes the curated Hermes Studio use catalog through one compact category tool', async () => {
+  it('exposes the curated DechnicAuditor use catalog through one compact category tool', async () => {
     const server = createServer((req, res) => {
       res.setHeader('content-type', 'application/json')
       if (req.url === '/api/chat-run/runs') {

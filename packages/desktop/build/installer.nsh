@@ -1,14 +1,14 @@
-!macro stopHermesStudioProcesses
-  IfFileExists "$INSTDIR\Hermes Studio.exe" 0 hermesStudioStopDone
-    DetailPrint "Stopping Hermes Studio..."
-    nsExec::ExecToLog '"$INSTDIR\Hermes Studio.exe" --quit'
+!macro stopDechnicAuditorProcesses
+  IfFileExists "$INSTDIR\DechnicAuditor.exe" 0 dechnicAuditorStopDone
+    DetailPrint "Stopping DechnicAuditor..."
+    nsExec::ExecToLog '"$INSTDIR\DechnicAuditor.exe" --quit'
     Pop $0
 
     InitPluginsDir
-    FileOpen $0 "$PLUGINSDIR\stop-hermes-studio.ps1" w
+    FileOpen $0 "$PLUGINSDIR\stop-dechnicauditor.ps1" w
     FileWrite $0 "$$ErrorActionPreference = 'SilentlyContinue'$\r$\n"
-    FileWrite $0 "$$target = [System.IO.Path]::GetFullPath($$env:HERMES_STUDIO_EXE)$\r$\n"
-    FileWrite $0 "$$installDir = [System.IO.Path]::GetFullPath($$env:HERMES_STUDIO_INSTALL_DIR)$\r$\n"
+    FileWrite $0 "$$target = [System.IO.Path]::GetFullPath($$env:DECHNICAUDITOR_EXE)$\r$\n"
+    FileWrite $0 "$$installDir = [System.IO.Path]::GetFullPath($$env:DECHNICAUDITOR_INSTALL_DIR)$\r$\n"
     FileWrite $0 "$$webUiHome = Join-Path $$env:USERPROFILE '.hermes-web-ui'$\r$\n"
     FileWrite $0 "function Normalize-Path([string]$$path) {$\r$\n"
     FileWrite $0 "  try { if ($$path) { return [System.IO.Path]::GetFullPath($$path) } } catch {}$\r$\n"
@@ -51,13 +51,13 @@
     FileWrite $0 "  if ($$normalizedDefault) { $$roots.Add($$normalizedDefault) }$\r$\n"
     FileWrite $0 "  return $$roots | Select-Object -Unique$\r$\n"
     FileWrite $0 "}$\r$\n"
-    FileWrite $0 "function Get-HermesStudioProcess {$\r$\n"
-    FileWrite $0 "  Get-CimInstance Win32_Process -Filter $\"Name = 'Hermes Studio.exe'$\" | Where-Object {$\r$\n"
+    FileWrite $0 "function Get-DechnicAuditorProcess {$\r$\n"
+    FileWrite $0 "  Get-CimInstance Win32_Process -Filter $\"Name = 'DechnicAuditor.exe'$\" | Where-Object {$\r$\n"
     FileWrite $0 "    try { $$_.ExecutablePath -and ([System.IO.Path]::GetFullPath($$_.ExecutablePath) -ieq $$target) } catch { $$false }$\r$\n"
     FileWrite $0 "  }$\r$\n"
     FileWrite $0 "}$\r$\n"
     FileWrite $0 "$$runtimeRoots = @(Get-DesktopRuntimeRoots)$\r$\n"
-    FileWrite $0 "function Get-HermesStudioRelatedProcess {$\r$\n"
+    FileWrite $0 "function Get-DechnicAuditorRelatedProcess {$\r$\n"
     FileWrite $0 "  Get-CimInstance Win32_Process | Where-Object {$\r$\n"
     FileWrite $0 "    if ($$protectedProcessIds.Contains([int]$$_.ProcessId)) { return $$false }$\r$\n"
     FileWrite $0 "    $$exe = Normalize-Path $$_.ExecutablePath$\r$\n"
@@ -70,7 +70,7 @@
     FileWrite $0 "    return $$false$\r$\n"
     FileWrite $0 "  }$\r$\n"
     FileWrite $0 "}$\r$\n"
-    FileWrite $0 "Get-HermesStudioProcess | ForEach-Object {$\r$\n"
+    FileWrite $0 "Get-DechnicAuditorProcess | ForEach-Object {$\r$\n"
     FileWrite $0 "  try {$\r$\n"
     FileWrite $0 "    $$process = Get-Process -Id $$_.ProcessId$\r$\n"
     FileWrite $0 "    if ($$process) { $$process.CloseMainWindow() | Out-Null }$\r$\n"
@@ -78,61 +78,61 @@
     FileWrite $0 "}$\r$\n"
     FileWrite $0 "$$gracefulDeadline = (Get-Date).AddSeconds(30)$\r$\n"
     FileWrite $0 "while ((Get-Date) -lt $$gracefulDeadline) {$\r$\n"
-    FileWrite $0 "  $$processes = @(Get-HermesStudioRelatedProcess)$\r$\n"
+    FileWrite $0 "  $$processes = @(Get-DechnicAuditorRelatedProcess)$\r$\n"
     FileWrite $0 "  if ($$processes.Count -eq 0) { exit 0 }$\r$\n"
     FileWrite $0 "  Start-Sleep -Milliseconds 500$\r$\n"
     FileWrite $0 "}$\r$\n"
     FileWrite $0 "$$forceDeadline = (Get-Date).AddSeconds(5)$\r$\n"
     FileWrite $0 "while ((Get-Date) -lt $$forceDeadline) {$\r$\n"
-    FileWrite $0 "  $$processes = @(Get-HermesStudioRelatedProcess)$\r$\n"
+    FileWrite $0 "  $$processes = @(Get-DechnicAuditorRelatedProcess)$\r$\n"
     FileWrite $0 "  if ($$processes.Count -eq 0) { exit 0 }$\r$\n"
     FileWrite $0 "  $$processes | ForEach-Object { try { Stop-Process -Id $$_.ProcessId -Force } catch {} }$\r$\n"
     FileWrite $0 "  Start-Sleep -Milliseconds 250$\r$\n"
     FileWrite $0 "}$\r$\n"
-    FileWrite $0 "if (@(Get-HermesStudioRelatedProcess).Count -eq 0) { exit 0 }$\r$\n"
+    FileWrite $0 "if (@(Get-DechnicAuditorRelatedProcess).Count -eq 0) { exit 0 }$\r$\n"
     FileWrite $0 "exit 1$\r$\n"
     FileClose $0
 
-    System::Call 'kernel32::SetEnvironmentVariable(t "HERMES_STUDIO_EXE", t "$INSTDIR\Hermes Studio.exe") i .r0'
-    System::Call 'kernel32::SetEnvironmentVariable(t "HERMES_STUDIO_INSTALL_DIR", t "$INSTDIR") i .r0'
-    nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\stop-hermes-studio.ps1"'
+    System::Call 'kernel32::SetEnvironmentVariable(t "DECHNICAUDITOR_EXE", t "$INSTDIR\DechnicAuditor.exe") i .r0'
+    System::Call 'kernel32::SetEnvironmentVariable(t "DECHNICAUDITOR_INSTALL_DIR", t "$INSTDIR") i .r0'
+    nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\stop-dechnicauditor.ps1"'
     Pop $0
-    System::Call 'kernel32::SetEnvironmentVariable(t "HERMES_STUDIO_EXE", t "") i .r0'
-    System::Call 'kernel32::SetEnvironmentVariable(t "HERMES_STUDIO_INSTALL_DIR", t "") i .r0'
-    nsExec::ExecToLog 'taskkill.exe /IM "Hermes Studio.exe" /T /F'
+    System::Call 'kernel32::SetEnvironmentVariable(t "DECHNICAUDITOR_EXE", t "") i .r0'
+    System::Call 'kernel32::SetEnvironmentVariable(t "DECHNICAUDITOR_INSTALL_DIR", t "") i .r0'
+    nsExec::ExecToLog 'taskkill.exe /IM "DechnicAuditor.exe" /T /F'
     Pop $0
-  hermesStudioStopDone:
+  dechnicAuditorStopDone:
 !macroend
 
-!macro repairHermesStudioUninstaller
-  IfFileExists "$INSTDIR\${UNINSTALL_FILENAME}" 0 hermesStudioRepairDone
-    DetailPrint "Repairing Hermes Studio uninstaller..."
+!macro repairDechnicAuditorUninstaller
+  IfFileExists "$INSTDIR\${UNINSTALL_FILENAME}" 0 dechnicAuditorRepairDone
+    DetailPrint "Repairing DechnicAuditor uninstaller..."
     SetOutPath "$INSTDIR"
     Delete "$INSTDIR\${UNINSTALL_FILENAME}.hermes-repair"
     ClearErrors
     File "/oname=${UNINSTALL_FILENAME}.hermes-repair" "${UNINSTALLER_OUT_FILE}"
-    IfErrors hermesStudioRepairDone
+    IfErrors dechnicAuditorRepairDone
 
     ClearErrors
     Rename "$INSTDIR\${UNINSTALL_FILENAME}" "$INSTDIR\${UNINSTALL_FILENAME}.hermes-backup"
-    IfErrors hermesStudioRepairCleanup
+    IfErrors dechnicAuditorRepairCleanup
     Rename "$INSTDIR\${UNINSTALL_FILENAME}.hermes-repair" "$INSTDIR\${UNINSTALL_FILENAME}"
-    IfErrors hermesStudioRepairRestore
+    IfErrors dechnicAuditorRepairRestore
     Delete "$INSTDIR\${UNINSTALL_FILENAME}.hermes-backup"
-    Goto hermesStudioRepairDone
+    Goto dechnicAuditorRepairDone
 
-  hermesStudioRepairRestore:
+  dechnicAuditorRepairRestore:
     Rename "$INSTDIR\${UNINSTALL_FILENAME}.hermes-backup" "$INSTDIR\${UNINSTALL_FILENAME}"
-  hermesStudioRepairCleanup:
+  dechnicAuditorRepairCleanup:
     Delete "$INSTDIR\${UNINSTALL_FILENAME}.hermes-repair"
-  hermesStudioRepairDone:
+  dechnicAuditorRepairDone:
 !macroend
 
 !macro customInit
-  !insertmacro stopHermesStudioProcesses
-  !insertmacro repairHermesStudioUninstaller
+  !insertmacro stopDechnicAuditorProcesses
+  !insertmacro repairDechnicAuditorUninstaller
 !macroend
 
 !macro customCheckAppRunning
-  !insertmacro stopHermesStudioProcesses
+  !insertmacro stopDechnicAuditorProcesses
 !macroend

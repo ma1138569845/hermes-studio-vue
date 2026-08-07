@@ -2,7 +2,7 @@
 
 ## 结论
 
-当 Hermes Studio 以 Codex Coding Agent 运行任务时，Codex CLI 子进程和 Studio Provider Proxy 会同时观察同一次模型调用：
+当 智能审 以 Codex Coding Agent 运行任务时，Codex CLI 子进程和 Studio Provider Proxy 会同时观察同一次模型调用：
 
 - Codex CLI 的 JSONL/进程退出是 Coding Agent Run 的原生执行终态；
 - Provider Proxy 的 Responses 事件用于流式文本、工具展示和 usage 采集。

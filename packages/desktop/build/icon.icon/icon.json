@@ -6,10 +6,10 @@
         {
           "glass": false,
           "image-name": "hermes-logo.png",
-          "name": "Hermes Studio"
+          "name": "DechnicAuditor"
         }
       ],
-      "name": "Hermes Studio",
+      "name": "DechnicAuditor",
       "shadow": {
         "kind": "none",
         "opacity": 0.5

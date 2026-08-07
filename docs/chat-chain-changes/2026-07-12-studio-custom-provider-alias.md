@@ -8,7 +8,7 @@ impact: Prevents a custom provider alias from triggering a redundant client rebu
 
 # Studio custom-provider alias client rebuild
 
-Hermes Studio sends the visible provider selector (for example `custom:liuzheng`) on chat runs, while Hermes Agent normalizes the active runtime provider to `custom`.
+DechnicAuditor sends the visible provider selector (for example `custom:liuzheng`) on chat runs, while Hermes Agent normalizes the active runtime provider to `custom`.
 
 The bridge previously stored only the normalized provider in the session. On the next request, `custom:liuzheng != custom` was treated as a runtime change, so the bridge called `AIAgent.switch_model()` even when the model, endpoint, and transport were unchanged.
 

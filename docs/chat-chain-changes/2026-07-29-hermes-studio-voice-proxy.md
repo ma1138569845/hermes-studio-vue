@@ -1,8 +1,8 @@
 ---
 date: 2026-07-29
 pr: 2260
-feature: Hermes Studio voice provider bridge
-impact: Chat, Group Chat, and realtime voice playback can use every server-managed Hermes Studio TTS provider without changing existing provider-specific paths.
+feature: DechnicAuditor voice provider bridge
+impact: Chat, Group Chat, and realtime voice playback can use every server-managed DechnicAuditor TTS provider without changing existing provider-specific paths.
 ---
 
 The existing browser, OpenAI, custom, MiMo, and Doubao playback behavior

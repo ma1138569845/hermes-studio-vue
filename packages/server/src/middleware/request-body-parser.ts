@@ -2,7 +2,7 @@ import bodyParser from '@koa/bodyparser'
 
 /**
  * Parse every request shape used by the local APIs. `text` is required by the
- * Hermes Studio command-provider bridge, which posts the TTS input file as
+ * DechnicAuditor command-provider bridge, which posts the TTS input file as
  * `text/plain`.
  */
 export function createRequestBodyParser() {

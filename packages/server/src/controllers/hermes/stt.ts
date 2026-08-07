@@ -599,7 +599,7 @@ export async function transcribeVoiceProxy(ctx: Context) {
       return
     }
     ctx.status = 502
-    ctx.body = { error: error instanceof Error ? error.message : 'Hermes Studio transcription failed' }
+    ctx.body = { error: error instanceof Error ? error.message : 'DechnicAuditor transcription failed' }
   }
 }
 

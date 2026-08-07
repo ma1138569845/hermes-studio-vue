@@ -1,6 +1,6 @@
-# Hermes Studio
+# DechnicAuditor
 
-Electron desktop distribution for Hermes Studio.
+Electron desktop distribution for DechnicAuditor.
 
 ## Install
 
@@ -17,7 +17,7 @@ After the packaged desktop app starts, it installs managed command shims:
 
 | Command | Description |
 | --- | --- |
-| `hermes-studio` | Open the Hermes Studio desktop app |
+| `hermes-studio` | Open the DechnicAuditor desktop app |
 | `hermes-studio cli ...` | Run the bundled Hermes Agent CLI |
 | `hermes-studio web ...` | Run the bundled `hermes-web-ui` command |
 | `hermes-studio -h` | Show wrapper help |

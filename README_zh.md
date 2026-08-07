@@ -1,5 +1,5 @@
 <p align="center">
-  <strong>Hermes Studio</strong>
+  <strong>智能审</strong>
   <a href="./README.md">English</a>
 </p>
 
@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/EKKOLearnAI/hermes-studio/releases/latest">下载 Hermes Studio 桌面版</a>
+  <a href="https://github.com/EKKOLearnAI/hermes-studio/releases/latest">下载 智能审 桌面版</a>
   ·
   <a href="https://hermes-studio.ai/#/docs/getting-started">使用文档</a>
   ·
@@ -37,7 +37,7 @@
 
 ## 核心能力
 
-| 模块 | Hermes Studio 能做什么 |
+| 模块 | 智能审 能做什么 |
 |---|---|
 | Agent 聊天 | 运行 Hermes Agent 对话，支持流式回复、工具调用轨迹、生成文件预览、本地持久化会话和桌面独立聊天窗口。 |
 | 本地控制台 | 在一个仪表盘中管理 Profile、Provider、模型、凭证、记忆、技能、插件、日志和运行时设置。 |
@@ -243,10 +243,10 @@ hermes-web-ui reset-default-login
 ### 桌面应用与自动更新
 
 - Windows、macOS 和 Linux 原生 Electron 桌面壳
-- 内置 Web UI 运行时，并自动启动本地 Hermes Studio 服务
+- 内置 Web UI 运行时，并自动启动本地 智能审 服务
 - 桌面自动更新优先使用 Cloudflare 下载端点获取更新元数据和安装包
 - 如果 Cloudflare 更新源不可用，会回退到 GitHub Releases `latest` 资源
-- Windows 升级时会先尝试关闭已有 Hermes Studio 进程，再替换文件
+- Windows 升级时会先尝试关闭已有 智能审 进程，再替换文件
 
 ---
 
@@ -255,7 +255,7 @@ hermes-web-ui reset-default-login
 ### 桌面应用（推荐）
 
 从 [GitHub Releases](https://github.com/EKKOLearnAI/hermes-studio/releases/latest)
-下载最新的 **Hermes Studio** 桌面安装包。
+下载最新的 **智能审** 桌面安装包。
 
 桌面版会发布 macOS、Windows 和 Linux 构建；适用时会区分不同 CPU 架构。
 桌面应用内置 Web UI 运行时，Hermes Agent 数据会保存到原生 Hermes 目录：
@@ -271,7 +271,7 @@ hermes-web-ui reset-default-login
 
 | 命令 | 说明 |
 |---|---|
-| `hermes-studio` | 打开 Hermes Studio 桌面应用 |
+| `hermes-studio` | 打开 智能审 桌面应用 |
 | `hermes-studio cli ...` | 运行内置 Hermes Agent CLI |
 | `hermes-studio web ...` | 运行内置 `hermes-web-ui` 命令 |
 | `hermes-studio -h` | 显示 wrapper 帮助 |
@@ -458,5 +458,5 @@ BFF 层负责：Socket.IO 聊天流式推送、Hermes agent bridge、按 Profile
 
 [BSL-1.1](./LICENSE)
 
-该许可证覆盖 Hermes Studio、原 Hermes Web UI 名称、`hermes-web-ui` npm 包和
+该许可证覆盖 智能审、原 Hermes Web UI 名称、`hermes-web-ui` npm 包和
 CLI、桌面应用、固件、发布产物、文档以及本仓库内的关联文件。

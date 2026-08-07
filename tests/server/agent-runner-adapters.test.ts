@@ -325,7 +325,7 @@ describe('agent runner Responses adapters', () => {
           call_id: 'call_search',
           status: 'completed',
           execution: 'client',
-          arguments: { query: 'Hermes Studio browser tabs navigation' },
+          arguments: { query: 'DechnicAuditor browser tabs navigation' },
         },
         {
           type: 'tool_search_output',
@@ -356,7 +356,7 @@ describe('agent runner Responses adapters', () => {
           type: 'tool_use',
           id: 'call_search',
           name: 'tool_search',
-          input: { query: 'Hermes Studio browser tabs navigation' },
+          input: { query: 'DechnicAuditor browser tabs navigation' },
         }],
       },
       {
@@ -574,7 +574,7 @@ describe('agent runner Responses adapters', () => {
         type: 'tool_use',
         id: 'call_search',
         name: 'tool_search',
-        input: { query: 'Hermes Studio browser', limit: 5 },
+        input: { query: 'DechnicAuditor browser', limit: 5 },
       }],
       usage: { input_tokens: 2, output_tokens: 3 },
     }, target)).toMatchObject({
@@ -583,7 +583,7 @@ describe('agent runner Responses adapters', () => {
         call_id: 'call_search',
         status: 'completed',
         execution: 'client',
-        arguments: { query: 'Hermes Studio browser', limit: 5 },
+        arguments: { query: 'DechnicAuditor browser', limit: 5 },
       }],
     })
   })
@@ -768,7 +768,7 @@ describe('agent runner Responses stream adapters', () => {
     const events = await collectEvents(anthropicMessagesSseToResponsesEvents(encodedChunks([
       'event: message_start\ndata: {"type":"message_start","message":{"id":"msg_search"}}\n\n',
       'event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"call_search","name":"tool_search","input":{}}}\n\n',
-      'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\\"query\\":\\"Hermes Studio browser\\"}"}}\n\n',
+      'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\\"query\\":\\"DechnicAuditor browser\\"}"}}\n\n',
       'event: message_stop\ndata: {"type":"message_stop"}\n\n',
     ]), codexTarget))
 
@@ -793,7 +793,7 @@ describe('agent runner Responses stream adapters', () => {
             call_id: 'call_search',
             status: 'completed',
             execution: 'client',
-            arguments: { query: 'Hermes Studio browser' },
+            arguments: { query: 'DechnicAuditor browser' },
           },
         }),
       }),

@@ -165,7 +165,7 @@ export async function handleSessionCommand(
         ok: false,
         action,
         terminal: !state.isWorking,
-        message: 'Use /bundles create in Hermes Studio to open the bundle creator.',
+        message: 'Use /bundles create in 智能审 to open the bundle creator.',
       })
       return
     }

@@ -29,7 +29,7 @@ describe('Windows installer shutdown hook', () => {
     const forceDeadline = script.indexOf('$$forceDeadline = (Get-Date).AddSeconds(5)', gracefulDeadline)
     const forceStop = script.indexOf('Stop-Process -Id $$_.ProcessId -Force', gracefulDeadline)
 
-    expect(script).toContain(`nsExec::ExecToLog '"$INSTDIR\\Hermes Studio.exe" --quit'`)
+    expect(script).toContain(`nsExec::ExecToLog '"$INSTDIR\\DechnicAuditor.exe" --quit'`)
     expect(gracefulDeadline).toBeGreaterThan(-1)
     expect(forceDeadline).toBeGreaterThan(gracefulDeadline)
     expect(forceStop).toBeGreaterThan(forceDeadline)

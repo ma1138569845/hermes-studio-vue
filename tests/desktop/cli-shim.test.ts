@@ -47,10 +47,10 @@ function decodedPowerShellValues(content: string): string[] {
     .map(match => Buffer.from(match[1], 'base64').toString('utf-8'))
 }
 
-describe('Hermes Studio CLI shim', () => {
+describe('DechnicAuditor CLI shim', () => {
   it('quotes Unix app paths and routes app, cli, web, and help commands', () => {
     const content = createShimContent(
-      "/Applications/Hermes Studio's.app/Contents/MacOS/Hermes Studio",
+      "/Applications/DechnicAuditor's.app/Contents/MacOS/DechnicAuditor",
       'darwin',
       'arm64',
       '0.15.2',
@@ -59,7 +59,7 @@ describe('Hermes Studio CLI shim', () => {
     )
 
     expect(content).toContain("--hermes-cli")
-    expect(content).toContain("APP='/Applications/Hermes Studio'\\''s.app/Contents/MacOS/Hermes Studio'")
+    expect(content).toContain("APP='/Applications/DechnicAuditor'\\''s.app/Contents/MacOS/DechnicAuditor'")
     expect(content).toContain("NODE='/runtime/node/bin/node'")
     expect(content).toContain("WEBUI_SCRIPT='/resources/webui/bin/hermes-web-ui.mjs'")
     expect(content).toContain('unset ELECTRON_RUN_AS_NODE')
@@ -73,7 +73,7 @@ describe('Hermes Studio CLI shim', () => {
 
   it('routes Windows cli and web subcommands through bundled runtime paths', () => {
     const command = createShimContent(
-      'C:\\Users\\Example\\AppData\\Local\\Programs\\Hermes Studio\\Hermes Studio.exe',
+      'C:\\Users\\Example\\AppData\\Local\\Programs\\DechnicAuditor\\DechnicAuditor.exe',
       'win32',
       'x64',
       undefined,
@@ -81,7 +81,7 @@ describe('Hermes Studio CLI shim', () => {
       'C:\\resources\\webui\\bin\\hermes-web-ui.mjs',
     )
     const powershell = createPowerShellShimContent(
-      'C:\\Users\\Example\\AppData\\Local\\Programs\\Hermes Studio\\Hermes Studio.exe',
+      'C:\\Users\\Example\\AppData\\Local\\Programs\\DechnicAuditor\\DechnicAuditor.exe',
       'x64',
       undefined,
       'C:\\runtime\\node\\node.exe',
@@ -94,7 +94,7 @@ describe('Hermes Studio CLI shim', () => {
     expect(command).toContain('-File "%~dp0hermes-studio.ps1" %*')
     expect(command).not.toContain('C:\\runtime')
     expect([...Buffer.from(command)].every(byte => byte < 0x80)).toBe(true)
-    expect(appPath).toBe('C:\\Users\\Example\\AppData\\Local\\Programs\\Hermes Studio\\Hermes Studio.exe')
+    expect(appPath).toBe('C:\\Users\\Example\\AppData\\Local\\Programs\\DechnicAuditor\\DechnicAuditor.exe')
     expect(nodePath).toBe('C:\\runtime\\node\\node.exe')
     expect(webUiScriptPath).toBe('C:\\resources\\webui\\bin\\hermes-web-ui.mjs')
     expect(forwarder).toContain("path.join(webUiHome,'desktop-runtime','hermes','0.20.0','win-x64')")
@@ -123,11 +123,11 @@ describe('Hermes Studio CLI shim', () => {
       '',
     ].join('\r\n'), 'ascii')
     writeFileSync(shimPath, createPowerShellShimContent(
-      'C:\\Program Files\\Hermes Studio\\Hermes Studio.exe',
+      'C:\\Program Files\\DechnicAuditor\\DechnicAuditor.exe',
       'x64',
       '0.19.1',
       fakeNodePath,
-      'C:\\Program Files\\Hermes Studio\\resources\\webui\\bin\\hermes-web-ui.mjs',
+      'C:\\Program Files\\DechnicAuditor\\resources\\webui\\bin\\hermes-web-ui.mjs',
     ), 'ascii')
 
     const encodedArgs = execFileSync('powershell.exe', [
@@ -206,7 +206,7 @@ describe('Hermes Studio CLI shim', () => {
     const result = await installHermesStudioCliShim({
       homeDir,
       platform: 'darwin',
-      executablePath: '/Applications/Hermes Studio.app/Contents/MacOS/Hermes Studio',
+      executablePath: '/Applications/DechnicAuditor.app/Contents/MacOS/DechnicAuditor',
       nodePath: '/runtime/node/bin/node',
       webUiScriptPath: '/resources/webui/bin/hermes-web-ui.mjs',
       env: { PATH: '/usr/bin', SHELL: '/bin/zsh' },
@@ -245,7 +245,7 @@ describe('Hermes Studio CLI shim', () => {
     const result = await installHermesStudioCliShim({
       homeDir,
       platform: 'win32',
-      executablePath: 'C:\\Program Files\\Hermes Studio\\Hermes Studio.exe',
+      executablePath: 'C:\\Program Files\\DechnicAuditor\\DechnicAuditor.exe',
       nodePath: 'D:\\新建文件夹\\hermes\\0.19.1\\win-x64\\node\\node.exe',
       webUiScriptPath: 'D:\\新建文件夹\\webui\\bin\\hermes-web-ui.mjs',
       env: { Path: existingPath },
@@ -287,9 +287,9 @@ describe('Hermes Studio CLI shim', () => {
     const result = await installHermesStudioCliShim({
       homeDir,
       platform: 'win32',
-      executablePath: 'C:\\Program Files\\Hermes Studio\\Hermes Studio.exe',
+      executablePath: 'C:\\Program Files\\DechnicAuditor\\DechnicAuditor.exe',
       nodePath: 'D:\\新建文件夹\\hermes\\0.19.1\\win-x64\\node\\node.exe',
-      webUiScriptPath: 'C:\\Program Files\\Hermes Studio\\resources\\webui\\bin\\hermes-web-ui.mjs',
+      webUiScriptPath: 'C:\\Program Files\\DechnicAuditor\\resources\\webui\\bin\\hermes-web-ui.mjs',
       env: { Path: existingPath },
     })
 
@@ -320,9 +320,9 @@ describe('Hermes Studio CLI shim', () => {
     const result = await installHermesStudioCliShim({
       homeDir,
       platform: 'win32',
-      executablePath: 'C:\\Program Files\\Hermes Studio\\Hermes Studio.exe',
-      nodePath: 'C:\\Program Files\\Hermes Studio\\node.exe',
-      webUiScriptPath: 'C:\\Program Files\\Hermes Studio\\resources\\webui\\bin\\hermes-web-ui.mjs',
+      executablePath: 'C:\\Program Files\\DechnicAuditor\\DechnicAuditor.exe',
+      nodePath: 'C:\\Program Files\\DechnicAuditor\\node.exe',
+      webUiScriptPath: 'C:\\Program Files\\DechnicAuditor\\resources\\webui\\bin\\hermes-web-ui.mjs',
       env: { Path: existingPath },
     })
 

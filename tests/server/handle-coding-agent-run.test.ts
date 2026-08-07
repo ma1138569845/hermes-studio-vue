@@ -338,7 +338,7 @@ describe('handleCodingAgentRun', () => {
     writeModelRunProfileTokenMock.mockResolvedValue(undefined)
     getSystemPromptMock.mockReturnValue([
       'system prompt',
-      'Hermes Studio MCP usage: call hermes_studio_api_openapi_get before calling unfamiliar Web UI endpoints.',
+      'DechnicAuditor MCP usage: call hermes_studio_api_openapi_get before calling unfamiliar Web UI endpoints.',
       'Use hermes_studio_api_request with method, relative path, and JSON body/query fields.',
     ].join('\n'))
 
@@ -370,7 +370,7 @@ describe('handleCodingAgentRun', () => {
     expect(sendCodingAgentRunInputMock).toHaveBeenCalledWith(
       'session-1',
       'hello codex',
-      expect.stringContaining('system prompt\nHermes Studio MCP usage'),
+      expect.stringContaining('system prompt\nDechnicAuditor MCP usage'),
     )
     const prompt = sendCodingAgentRunInputMock.mock.calls.at(-1)?.[2]
     expect(prompt).toContain('hermes_studio_api_request')

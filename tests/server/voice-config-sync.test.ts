@@ -52,7 +52,7 @@ async function readConfig(): Promise<Record<string, any>> {
 }
 
 describe('Hermes voice config sync', () => {
-  it('registers one Hermes Studio provider while keeping upstream settings and secrets in Web UI storage', async () => {
+  it('registers one DechnicAuditor provider while keeping upstream settings and secrets in Web UI storage', async () => {
     const sttStore = await import('../../packages/server/src/db/hermes/stt-settings-store')
     const ttsStore = await import('../../packages/server/src/db/hermes/tts-settings-store')
     sttStore.saveSttProviderSetting('default', 'openai', {
@@ -146,7 +146,7 @@ describe('Hermes voice config sync', () => {
     expect(config.tts.providers['hermes-studio'].output_format).toBe('mp3')
   })
 
-  it('hides Groq and MiMo behind the same Hermes Studio provider', async () => {
+  it('hides Groq and MiMo behind the same DechnicAuditor provider', async () => {
     const sttStore = await import('../../packages/server/src/db/hermes/stt-settings-store')
     const ttsStore = await import('../../packages/server/src/db/hermes/tts-settings-store')
     sttStore.saveSttProviderSetting('default', 'custom', {

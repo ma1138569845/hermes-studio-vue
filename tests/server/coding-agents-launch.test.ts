@@ -261,7 +261,7 @@ describe('coding agent launch preparation', () => {
     expect(prompt).toContain('当你的回复中包含图片、视频或文件引用时')
   })
 
-  it('uses the desktop runtime node for scoped Hermes Studio MCP configs when available', async () => {
+  it('uses the desktop runtime node for scoped DechnicAuditor MCP configs when available', async () => {
     const home = makeHome()
     process.env.HERMES_AGENT_NODE = '/runtime/node'
 
@@ -743,7 +743,7 @@ describe('coding agent launch preparation', () => {
     expect(config).toContain(`model_catalog_json = "${join(result.rootDir, 'codex-model-catalog.json')}"`)
     expect(config).toContain('model_reasoning_summary = "auto"')
     expect(config).toContain('developer_instructions = """')
-    expect(config).toContain('Hermes Studio MCP usage')
+    expect(config).toContain('DechnicAuditor MCP usage')
     expect(config).toContain('hermes_studio_browser_toolset is available')
     expect(config).toContain('call it with action=list')
     expect(config).toContain('Browser MCP exposes a compact toolset rather than resources')
@@ -1055,7 +1055,7 @@ describe('coding agent launch preparation', () => {
           type: 'tool_use',
           id: 'call_search',
           name: 'tool_search',
-          input: { query: 'Hermes Studio browser tabs' },
+          input: { query: 'DechnicAuditor browser tabs' },
         }],
         stop_reason: 'tool_use',
         usage: { input_tokens: 3, output_tokens: 1 },
@@ -1104,7 +1104,7 @@ describe('coding agent launch preparation', () => {
       call_id: 'call_search',
       status: 'completed',
       execution: 'client',
-      arguments: { query: 'Hermes Studio browser tabs' },
+      arguments: { query: 'DechnicAuditor browser tabs' },
     }])
 
     const secondCtx = makeProxyContext(routeKey, token, {
@@ -1115,7 +1115,7 @@ describe('coding agent launch preparation', () => {
           call_id: 'call_search',
           status: 'completed',
           execution: 'client',
-          arguments: { query: 'Hermes Studio browser tabs' },
+          arguments: { query: 'DechnicAuditor browser tabs' },
         },
         {
           type: 'tool_search_output',
@@ -1192,7 +1192,7 @@ describe('coding agent launch preparation', () => {
       tools: [{
         type: 'namespace',
         name: 'mcp__hermes_studio_browser',
-        description: 'Hermes Studio browser tools',
+        description: 'DechnicAuditor browser tools',
       }],
     })
 

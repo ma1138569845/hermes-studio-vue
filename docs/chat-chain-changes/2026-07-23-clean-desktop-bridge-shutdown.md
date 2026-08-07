@@ -2,7 +2,7 @@
 date: 2026-07-23
 pr: pending
 feature: Clean Desktop Agent Bridge shutdown
-impact: Exiting Hermes Studio now force-stops the managed Agent Bridge process tree if graceful shutdown does not finish in time.
+impact: Exiting DechnicAuditor now force-stops the managed Agent Bridge process tree if graceful shutdown does not finish in time.
 ---
 
 Desktop shutdown still asks the Agent Bridge and its profile workers to stop

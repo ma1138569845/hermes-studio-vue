@@ -32,7 +32,7 @@ Ekko 的 UI 协议、校验、状态和 Host interface 不依赖 Vue、React、S
 或浏览器 DOM。官方浏览器 renderer 也只使用原生 DOM、Shadow DOM、Canvas 2D 和 CSS
 Custom Properties。
 
-Hermes Studio 可以使用一个很薄的 Vue mount wrapper，但 Vue 不能进入 Ekko 的 UI
+智能审 可以使用一个很薄的 Vue mount wrapper，但 Vue 不能进入 Ekko 的 UI
 协议或 renderer。
 
 ### Agent 不发送任意代码
@@ -544,9 +544,9 @@ function mountEkkoUI(
 所有 URL、图片和链接都经过 resource resolver 和 scheme allowlist。Renderer 不发送
 网络请求，除非 Host 明确为某类资源提供了已授权的解析结果。
 
-## Hermes Studio Adapter
+## 智能审 Adapter
 
-Hermes Studio 需要实现 `EkkoUIHost`，但这些代码不进入 Ekko Core。
+智能审 需要实现 `EkkoUIHost`，但这些代码不进入 Ekko Core。
 
 建议文件：
 
@@ -586,7 +586,7 @@ Ekko UI 协议。危险工具审批也保持独立，不能伪装成普通 Surfa
 
 ## 持久化
 
-Surface 是 Host 会话 UI 状态，不是 Ekko 长期记忆。Hermes Studio 应将它存入 Web UI
+Surface 是 Host 会话 UI 状态，不是 Ekko 长期记忆。智能审 应将它存入 Web UI
 数据库，而不是 `.ekko/ekko.db`。
 
 建议表：
@@ -702,7 +702,7 @@ interface EkkoUILimits {
 - destroy 后不保留事件监听器。
 - URL 和资源策略。
 
-### Hermes Studio
+### 智能审
 
 - Socket action 的 session/user/profile 所有权。
 - 旧 revision、重复提交和跨 session 提交。
@@ -742,7 +742,7 @@ Surface，不加载 DOM 或 Node 特有模块。
 
 验收：纯 HTML 项目不使用任何 UI 框架即可 mount、update、submit 和 destroy Surface。
 
-### 第四阶段：Hermes Studio 闭环
+### 第四阶段：智能审 闭环
 
 - 实现 Server broker、数据库、Socket 事件和权限检查。
 - 实现 Vue mount wrapper 和聊天时间线锚点。

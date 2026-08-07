@@ -154,7 +154,7 @@ test('places Windows controls in a dedicated bar above main content', async ({ p
   await expect(controls).toBeVisible()
   await expect(controls.locator('.desktop-window-btn')).toHaveCount(3)
   await expect(controls.locator('img')).toHaveCount(0)
-  await expect(controls).not.toContainText('Hermes Studio')
+  await expect(controls).not.toContainText('智能审')
 
   const [controlsBox, headerBox] = await Promise.all([
     controls.boundingBox(),

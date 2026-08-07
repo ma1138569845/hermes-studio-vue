@@ -8,7 +8,7 @@
 
 ## 一、结论
 
-Hermes Studio 桌面端新增一个基于 Electron <code>WebContentsView</code> 的内置浏览器。
+智能审 桌面端新增一个基于 Electron <code>WebContentsView</code> 的内置浏览器。
 普通浏览器打开的 Web UI、VPS 部署的 Web UI 都不提供浏览器功能。
 
 浏览器有两条控制链路，最终都汇入 Electron 主进程中的
@@ -42,7 +42,7 @@ Electron API 和 CDP：
 
 ## 二、目标
 
-- 在 Hermes Studio 桌面端提供可见的内置浏览器。
+- 在 智能审 桌面端提供可见的内置浏览器。
 - 支持多个标签页，并保留每个标签页独立的导航状态。
 - 用户与 Agent 操作同一个可见页面，而不是另外启动隐藏浏览器。
 - Ekko Agent、Hermes Agent、Codex、Claude Code 共用同一套浏览器工具。
@@ -387,7 +387,7 @@ new WebContentsView({
 })
 ~~~
 
-远程网页 View 不加载 Preload。所有高权限操作只能从 Hermes Studio 主 Renderer
+远程网页 View 不加载 Preload。所有高权限操作只能从 智能审 主 Renderer
 经过可信 Preload IPC 到 Electron 主进程。
 
 ### 9.3 标签页模型
@@ -486,7 +486,7 @@ interface DesktopBrowserBridge {
 Profile 和下载目录必须由 Electron 原生目录选择器选择。Renderer 只能请求打开
 选择器，不能直接提交任意路径让主进程读写。
 
-每个 <code>ipcMain</code> Handler 都必须验证 Sender 是可信 Hermes Studio
+每个 <code>ipcMain</code> Handler 都必须验证 Sender 是可信 智能审
 Renderer。
 
 ### 10.2 Bounds
@@ -1028,7 +1028,7 @@ browserSession.setDownloadPath(profile.downloadPath)
 - 第九个标签页返回本地化错误；
 - Ekko、Hermes、一个 coding agent 分别操作同一个可见页面；
 - UI 切换标签页后，Agent 仍绑定原标签页；
-- Agent 不能访问 Hermes Studio 主 Renderer；
+- Agent 不能访问 智能审 主 Renderer；
 - Profile Cookie 持久化且与 Web UI 隔离；
 - 全部 Profile Cookie 使用操作系统安全存储加密镜像、运行期保存，并在重启后于首个请求前恢复；
 - 退出时的 Profile 保存超过 2 秒会继续退出，不会无限等待；
@@ -1117,12 +1117,12 @@ browserSession.setDownloadPath(profile.downloadPath)
 
 ## 二十、验收标准
 
-- 桌面用户可以在 Hermes Studio 内打开多个本地或 HTTPS 页面。
+- 桌面用户可以在 智能审 内打开多个本地或 HTTPS 页面。
 - 标签页切换后各自状态保持。
 - Ekko、Hermes、Codex、Claude Code 使用同一套 MCP 工具。
 - 所有 Agent 操作的是同一个可见页面，不启动第二个 Chrome。
 - Agent 操作始终绑定指定标签页。
-- Agent 不能访问 Hermes Studio 主 Renderer。
+- Agent 不能访问 智能审 主 Renderer。
 - 用户能看到操作并随时接管。
 - 浏览器登录状态只保存在 Hermes Browser Profile。
 - 用户可以创建和切换多个 Profile，各 Profile 的登录状态和下载目录隔离。
