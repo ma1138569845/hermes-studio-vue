@@ -512,7 +512,7 @@ for (const phrase of [
 }
 
 for (const phrase of [
-  'HERMES_STUDIO_EXE',
+  'DECHNICAUDITOR_EXE',
   'Get-CimInstance Win32_Process',
   'CloseMainWindow()',
   'Stop-Process -Id',

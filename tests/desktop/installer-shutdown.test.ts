@@ -6,8 +6,8 @@ describe('Windows installer shutdown hook', () => {
   it('stops child runtime processes that still reference the installed app', () => {
     const script = readFileSync(resolve('packages/desktop/build/installer.nsh'), 'utf8')
 
-    expect(script).toContain('HERMES_STUDIO_INSTALL_DIR')
-    expect(script).toContain('Get-HermesStudioRelatedProcess')
+    expect(script).toContain('DECHNICAUDITOR_INSTALL_DIR')
+    expect(script).toContain('Get-DechnicAuditorRelatedProcess')
     expect(script).toContain('desktop-runtime\\active-version.json')
     expect(script).toContain('hermes-studio-mcp|hermes_bridge\\.py|hermes_cli\\.main gateway run')
     expect(script).toContain('Stop-Process -Id')
@@ -39,9 +39,9 @@ describe('Windows installer shutdown hook', () => {
   it('replaces the broken installed uninstaller before upgrading', () => {
     const script = readFileSync(resolve('packages/desktop/build/installer.nsh'), 'utf8')
 
-    expect(script).toContain('!macro repairHermesStudioUninstaller')
+    expect(script).toContain('!macro repairDechnicAuditorUninstaller')
     expect(script).toContain('${UNINSTALL_FILENAME}.hermes-repair')
     expect(script).toContain('${UNINSTALL_FILENAME}.hermes-backup')
-    expect(script).toContain('!insertmacro repairHermesStudioUninstaller')
+    expect(script).toContain('!insertmacro repairDechnicAuditorUninstaller')
   })
 })
