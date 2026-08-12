@@ -62,7 +62,8 @@ describe('Hermes source runtime relocation', () => {
       join(sitePackages, '__editable___hermes_agent_0_20_0_finder.py'),
       'utf-8',
     )).toContain(`${finalSource}/agent`)
-    expect(readFileSync(join(distInfo, 'direct_url.json'), 'utf-8')).toContain(finalSource)
+    // direct_url.json is JSON-serialized, so Windows backslashes are escaped.
+    expect(readFileSync(join(distInfo, 'direct_url.json'), 'utf-8')).toContain(finalSource.replace(/\\/g, '\\\\'))
     expect(readFileSync(join(binDir, 'hermes'), 'utf-8')).toContain(
       'exec "$DIR/python3" -m hermes_cli.main "$@"',
     )

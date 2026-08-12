@@ -1334,7 +1334,8 @@ describe('ekko-agent context usage events', () => {
       }),
     ])
     const storedUserMessage = addMessageMock.mock.calls.find(call => call[0]?.role === 'user')?.[0]
-    expect(storedUserMessage?.content).toContain(imagePath)
+    // The content is JSON-serialized, so Windows backslashes appear escaped.
+    expect(storedUserMessage?.content).toContain(imagePath.replace(/\\/g, '\\\\'))
     expect(storedUserMessage?.content).not.toContain(expectedBase64)
   })
 

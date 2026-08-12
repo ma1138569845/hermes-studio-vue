@@ -20,7 +20,7 @@ afterEach(async () => {
 
 async function runBridgeProbe(script: string): Promise<any> {
   const bridgePath = resolve('packages/server/src/services/hermes/agent-bridge/python/hermes_bridge.py')
-  const { stdout } = await execFileAsync('python3', ['-c', script], {
+  const { stdout } = await execFileAsync(process.platform === 'win32' ? 'python' : 'python3', ['-c', script], {
     cwd: resolve('.'),
     env: {
       ...process.env,

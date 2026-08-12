@@ -89,7 +89,8 @@ describe('write gate service', () => {
     await expect(getPendingWriteDiff('default', 'memory', '../abc')).rejects.toThrow('Invalid pending write id')
   })
 
-  it('detects write approval support from a uv-backed Hermes venv shebang', async () => {
+  it.skipIf(process.platform === 'win32')('detects write approval support from a uv-backed Hermes venv shebang', async () => {
+    // The fixture needs a file symlink plus an executable shebang shim, both POSIX-only.
     const agentRoot = join(hermesHome, 'agent')
     const venvBin = join(agentRoot, 'venv', 'bin')
     const externalPythonDir = join(hermesHome, 'uv-python', 'bin')
@@ -131,7 +132,8 @@ describe('write gate service', () => {
     expect(isWriteGateSupported()).toBe(true)
   })
 
-  it('detects write approval support from a pip-installed runtime Python', async () => {
+  it.skipIf(process.platform === 'win32')('detects write approval support from a pip-installed runtime Python', async () => {
+    // The fixture is an executable shell shim; Windows cannot spawn bare scripts without shell:true.
     const fakePython = join(hermesHome, 'python')
     await writeFile(fakePython, [
       '#!/bin/sh',
@@ -151,7 +153,7 @@ describe('write gate service', () => {
     expect(isWriteGateSupported()).toBe(true)
   })
 
-  it('uses the structured Python result and treats empty output as failure', async () => {
+  it.skipIf(process.platform === 'win32')('uses the structured Python result and treats empty output as failure', async () => {
     await configureFakeApprovalRuntime([
       '#!/bin/sh',
       'case "$6" in',
@@ -177,7 +179,7 @@ describe('write gate service', () => {
     })
   })
 
-  it('serializes approval actions within the same profile', async () => {
+  it.skipIf(process.platform === 'win32')('serializes approval actions within the same profile', async () => {
     await configureFakeApprovalRuntime([
       '#!/bin/sh',
       'guard="$HERMES_HOME/.write-gate-action-running"',

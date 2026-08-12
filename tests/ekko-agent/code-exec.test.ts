@@ -64,13 +64,15 @@ describe('code_exec', () => {
       }, { workspaceRoot })
 
       expect(result.ok).toBe(true)
-      expect(JSON.parse(result.content)).toMatchObject({
+      const parsed = JSON.parse(result.content)
+      expect(parsed).toMatchObject({
         status: 'completed',
         language: 'python',
-        output: 'HELLO FROM PYTHON\n',
         toolCallsMade: 1,
         exitCode: 0,
       })
+      // Windows Python writes CRLF line endings; normalize for comparison.
+      expect(parsed.output.replace(/\r\n/g, '\n')).toBe('HELLO FROM PYTHON\n')
     },
   )
 

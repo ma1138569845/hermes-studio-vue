@@ -97,8 +97,10 @@ describe('ekko-agent tools', () => {
   it('normalizes shell-like terminal command strings when args are omitted', async () => {
     const terminal = new TerminalExecTool()
 
+    // On Windows the node binary lives under "Program Files", so shell-style strings must quote it.
+    const execPathToken = process.platform === 'win32' ? `"${process.execPath}"` : process.execPath
     await expect(terminal.execute({
-      command: `${process.execPath} -e "process.stdout.write(process.argv[1])" hello-split`,
+      command: `${execPathToken} -e "process.stdout.write(process.argv[1])" hello-split`,
     }, { workspaceRoot })).resolves.toMatchObject({
       ok: true,
       content: 'hello-split',

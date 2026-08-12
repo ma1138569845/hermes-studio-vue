@@ -1,6 +1,10 @@
 import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+
+function symlinkDir(target: string, path: string): Promise<void> {
+  return symlink(target, path, process.platform === 'win32' ? 'junction' : 'dir')
+}
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { SkillListTool, SkillViewTool, createDefaultToolRegistry } from '../../packages/ekko-agent/src'
 
@@ -110,7 +114,7 @@ describe('ekko-agent skill tools', () => {
   it('does not follow cyclic directory symlinks forever', async () => {
     const category = join(skillDirectory, 'cyclic')
     await mkdir(category, { recursive: true })
-    await symlink(category, join(category, 'loop'))
+    await symlinkDir(category, join(category, 'loop'))
 
     const result = await new SkillListTool(skillDirectory).execute({})
 
@@ -327,7 +331,7 @@ describe('ekko-agent skill tools', () => {
     const outside = join(root, 'outside-skill')
     await mkdir(outside)
     await writeFile(join(outside, 'SKILL.md'), '# Outside\nMust stay hidden.\n')
-    await symlink(outside, join(skillDirectory, 'escaped-skill'))
+    await symlinkDir(outside, join(skillDirectory, 'escaped-skill'))
 
     const result = await new SkillListTool(skillDirectory).execute({})
     const payload = JSON.parse(result.content)

@@ -1,6 +1,8 @@
 import { EventEmitter } from 'node:events'
 import { createHash } from 'node:crypto'
 import { writeSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('node:child_process', () => ({
@@ -131,8 +133,11 @@ describe('ekko-agent browser tools', () => {
     const options = mockedSpawn.mock.calls[0]?.[2] as { env?: NodeJS.ProcessEnv }
     expect(options.env?.BROWSERBASE_API_KEY).toBe('browser-key')
     expect(options.env?.OPENAI_API_KEY).toBeUndefined()
-    expect(options.env?.AGENT_BROWSER_SOCKET_DIR).toBe(`/tmp/eab_${hashedSession('browser-session')}`)
-    expect((options.env?.AGENT_BROWSER_SOCKET_DIR || '').length).toBeLessThan(40)
+    expect(options.env?.AGENT_BROWSER_SOCKET_DIR).toBe(join(tmpdir(), `eab_${hashedSession('browser-session')}`))
+    // Unix domain socket path length matters only on POSIX; Windows temp roots are longer.
+    if (process.platform !== 'win32') {
+      expect((options.env?.AGENT_BROWSER_SOCKET_DIR || '').length).toBeLessThan(40)
+    }
   })
 
   it('blocks sensitive console expressions before spawning the browser CLI', async () => {

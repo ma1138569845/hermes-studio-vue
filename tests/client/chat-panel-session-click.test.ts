@@ -1,16 +1,21 @@
 import { readFileSync } from 'fs'
 import { describe, expect, it } from 'vitest'
 
+// Normalize line endings so multi-line assertions hold on Windows checkouts.
+function readSource(path: string): string {
+  return readFileSync(path, 'utf8').replace(/\r\n/g, '\n')
+}
+
 describe('ChatPanel session clicks', () => {
   it('switches the store when the route is already on the clicked session', () => {
-    const source = readFileSync('packages/client/src/components/hermes/chat/ChatPanel.vue', 'utf8')
+    const source = readSource('packages/client/src/components/hermes/chat/ChatPanel.vue')
 
     expect(source).toContain('if (chatStore.activeSessionId !== sessionId)')
     expect(source).toContain('await chatStore.switchSession(sessionId)')
   })
 
   it('opens desktop sessions in a native chat window while preserving the web tab fallback', () => {
-    const source = readFileSync('packages/client/src/components/hermes/chat/ChatPanel.vue', 'utf8')
+    const source = readSource('packages/client/src/components/hermes/chat/ChatPanel.vue')
 
     expect(source).toContain('bridge.openChatWindow(sessionId, sessionProfile(sessionId) || undefined)')
     expect(source).toContain('window.open(sessionHref(sessionId), "_blank", "noopener,noreferrer")')
@@ -19,7 +24,7 @@ describe('ChatPanel session clicks', () => {
   })
 
   it('replays the whole chat surface fade without remounting the input', () => {
-    const source = readFileSync('packages/client/src/components/hermes/chat/ChatPanel.vue', 'utf8')
+    const source = readSource('packages/client/src/components/hermes/chat/ChatPanel.vue')
 
     expect(source).toContain('ref="chatMainContentRef" class="chat-main-content"')
     expect(source).toContain('() => chatStore.activeSessionId')
@@ -29,7 +34,7 @@ describe('ChatPanel session clicks', () => {
   })
 
   it('allows session model switching for coding agent sessions', () => {
-    const source = readFileSync('packages/client/src/components/hermes/chat/ChatPanel.vue', 'utf8')
+    const source = readSource('packages/client/src/components/hermes/chat/ChatPanel.vue')
 
     expect(source).toContain('contextSession.value?.source === "coding_agent"')
     expect(source).toContain('isSessionModelScopedCodingAgent')
@@ -48,7 +53,7 @@ describe('ChatPanel session clicks', () => {
   })
 
   it('keeps the custom session model provider below the scrollable model lists', () => {
-    const source = readFileSync('packages/client/src/components/hermes/chat/ChatPanel.vue', 'utf8')
+    const source = readSource('packages/client/src/components/hermes/chat/ChatPanel.vue')
     const modalStart = source.indexOf('v-model:show="showSessionModelModal"')
     const modalEnd = source.indexOf('</NModal>', modalStart)
     const modal = source.slice(modalStart, modalEnd)
@@ -63,7 +68,7 @@ describe('ChatPanel session clicks', () => {
   })
 
   it('uses codingAgentId to filter scoped agent models and requests an API mode for all scoped agents', () => {
-    const source = readFileSync('packages/client/src/components/hermes/chat/ChatPanel.vue', 'utf8')
+    const source = readSource('packages/client/src/components/hermes/chat/ChatPanel.vue')
 
     expect(source).toContain('const sessionModelCodingAgentId = computed<ChatCodingAgentId | undefined>')
     expect(source).toContain('sessionModelSession.value?.codingAgentId ||')
@@ -74,7 +79,7 @@ describe('ChatPanel session clicks', () => {
   })
 
   it('uses the active sidebar model as the new chat default for the active profile', () => {
-    const source = readFileSync('packages/client/src/components/hermes/chat/ChatPanel.vue', 'utf8')
+    const source = readSource('packages/client/src/components/hermes/chat/ChatPanel.vue')
 
     expect(source).toContain('const selectedProvider = appStore.selectedProvider || ""')
     expect(source).toContain('const selectedModel = appStore.selectedModel || ""')
@@ -83,7 +88,7 @@ describe('ChatPanel session clicks', () => {
   })
 
   it('offers Ekko Agent when creating chats in production builds', () => {
-    const source = readFileSync('packages/client/src/components/hermes/chat/ChatPanel.vue', 'utf8')
+    const source = readSource('packages/client/src/components/hermes/chat/ChatPanel.vue')
 
     expect(source).toContain('{ label: "Ekko Agent", value: "ekko-agent" }')
     expect(source).not.toContain('showEkkoAgentEntry')
@@ -91,7 +96,7 @@ describe('ChatPanel session clicks', () => {
   })
 
   it('shows and persists the API mode for Ekko chats and model switches', () => {
-    const source = readFileSync('packages/client/src/components/hermes/chat/ChatPanel.vue', 'utf8')
+    const source = readSource('packages/client/src/components/hermes/chat/ChatPanel.vue')
 
     expect(source).toContain('apiMode: isNewChatCodingAgent.value && !isGlobalCodingAgent ? newChatApiMode.value : undefined')
     expect(source).toContain('v-if="isNewChatCodingAgent && effectiveNewChatAgentMode === \'scoped\'"')
@@ -100,14 +105,14 @@ describe('ChatPanel session clicks', () => {
   })
 
   it('uses a create action in the new chat drawer instead of duplicating the new chat trigger label', () => {
-    const source = readFileSync('packages/client/src/components/hermes/chat/ChatPanel.vue', 'utf8')
+    const source = readSource('packages/client/src/components/hermes/chat/ChatPanel.vue')
 
     expect(source).toContain('{{ t("common.create") }}')
     expect(source).not.toContain('{{ t("chat.newChat") }}\n            </NButton>')
   })
 
   it('offers MoA only for Hermes session creation and switching', () => {
-    const source = readFileSync('packages/client/src/components/hermes/chat/ChatPanel.vue', 'utf8')
+    const source = readSource('packages/client/src/components/hermes/chat/ChatPanel.vue')
 
     expect(source).toContain('if (group.provider === "moa") return newChatAgent.value === "hermes"')
     expect(source).toContain('newChatAgent.value === "hermes" && Boolean(newChatMoaGroup.value?.models.length)')

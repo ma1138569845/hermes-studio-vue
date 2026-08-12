@@ -438,7 +438,7 @@ describe('desktop runtime manager', () => {
     createRuntimeFiles(sourceRuntime, { standardWindowsVenv: true })
     mkdirSync(installedPython, { recursive: true })
     writeFileSync(join(installedPython, 'python.exe'), 'managed Python')
-    symlinkSync(installedPython, pythonAlias, 'dir')
+    symlinkSync(installedPython, pythonAlias, process.platform === 'win32' ? 'junction' : 'dir')
     writeFileSync(
       join(sourceRuntime, 'python', 'venv', 'pyvenv.cfg'),
       `home = ${pythonAlias}\nexecutable = ${join(pythonAlias, 'python.exe')}\n`,

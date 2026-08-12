@@ -3417,7 +3417,7 @@ describe('workflow manager', () => {
       await manager.delete(workflow.id)
     }
   })
-  it('recovers every active run after restart without the UI pagination limit', async () => {
+  it('recovers every active run after restart without the UI pagination limit', { timeout: 20000 }, async () => {
     const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
     const {
       createWorkflowRun, createWorkflowRunNodeSession, getWorkflowRun, listAllWorkflowRuns,

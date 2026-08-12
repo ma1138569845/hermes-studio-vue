@@ -1,4 +1,3 @@
-import { delimiter } from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const execState = vi.hoisted(() => {
@@ -88,6 +87,8 @@ describe('coding agent desktop PATH detection', () => {
     expect(status.version).toBe('1.2.3')
 
     const versionCall = execState.calls.find(call => call.command === 'claude' && call.args[0] === '--version')
-    expect(versionCall?.options.env.PATH.split(delimiter)).toContain('/Users/example/.npm-global/bin')
+    // The login-shell PATH is ':'-separated even when the host delimiter is ';' (stubbed platform).
+    const pathSegments = (versionCall?.options.env.PATH || '').split(/[;:]/)
+    expect(pathSegments).toContain('/Users/example/.npm-global/bin')
   })
 })

@@ -2,9 +2,32 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'os'
 import { dirname, join } from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { config } from '../../packages/server/src/config'
 import { claudeProxyMessages, claudeProxyModels, registerClaudeCodeProxyTarget } from '../../packages/server/src/services/agent-runner/proxies/claude-code-proxy'
 import { codexProxyModels, codexProxyResponses, registerCodexProxyTarget } from '../../packages/server/src/services/agent-runner/proxies/codex-proxy'
 import { prepareCodingAgentLaunch } from '../../packages/server/src/services/coding-agents'
+
+const LAUNCHER_FILE = process.platform === 'win32' ? 'launch.ps1' : 'launch.sh'
+const webUiOrigin = `http://127.0.0.1:${config.port}`
+
+function shellCommandFor(workspaceDir: string, command: string, args: string[] = [], env: Record<string, string> = {}): string {
+  if (process.platform === 'win32') {
+    const ps = (value: string) => `'${value.replace(/'/g, "''")}'`
+    const envAssignments = Object.entries(env).map(([key, value]) => `$env:${key} = ${ps(value)}`)
+    return [
+      `Set-Location -LiteralPath ${ps(workspaceDir)}`,
+      ...envAssignments,
+      `& ${ps(command)} ${args.map(ps).join(' ')}`.trim(),
+    ].join('; ')
+  }
+  const sq = (value: string) => (/^[A-Za-z0-9_./:=@+-]+$/.test(value) ? value : `'${value.replace(/'/g, `'\\''`)}'`)
+  const envPrefix = Object.entries(env).map(([key, value]) => `${key}=${sq(value)}`).join(' ')
+  return `cd ${sq(workspaceDir)} && ${[envPrefix, sq(command), ...args.map(sq)].filter(Boolean).join(' ')}`
+}
+
+function tomlStringArray(values: string[]): string {
+  return `[${values.map(value => JSON.stringify(value)).join(', ')}]`
+}
 
 const homes: string[] = []
 
@@ -75,7 +98,11 @@ describe('coding agent launch preparation', () => {
         '--dangerously-skip-permissions',
       ],
       env: {},
-      shellCommand: `cd ${join(home, 'coding-agent', 'workspace', 'default', 'global')} && claude --append-system-prompt-file ${join(home, 'global-home', '.claude', 'hermes-rules.md')} --dangerously-skip-permissions`,
+      shellCommand: shellCommandFor(
+        join(home, 'coding-agent', 'workspace', 'default', 'global'),
+        'claude',
+        ['--append-system-prompt-file', join(home, 'global-home', '.claude', 'hermes-rules.md'), '--dangerously-skip-permissions'],
+      ),
       files: [{
         key: 'prompt',
         path: '~/.claude/hermes-rules.md',
@@ -87,7 +114,7 @@ describe('coding agent launch preparation', () => {
     expect(prompt).toContain('# 输出格式规范')
   })
 
-  it('uses Claude Code auto permission mode instead of dangerous bypass when running as root', async () => {
+  it.skipIf(process.platform === 'win32')('uses Claude Code auto permission mode instead of dangerous bypass when running as root', async () => {
     mockProcessUid(0)
     const home = makeHome()
 
@@ -130,7 +157,7 @@ describe('coding agent launch preparation', () => {
       command: 'codex',
       args: [],
       env: {},
-      shellCommand: `cd ${join(home, 'coding-agent', 'workspace', 'default', 'global')} && codex`,
+      shellCommand: shellCommandFor(join(home, 'coding-agent', 'workspace', 'default', 'global'), 'codex'),
       files: [],
     })
   })
@@ -189,13 +216,17 @@ describe('coding agent launch preparation', () => {
       join(result.rootDir, 'hermes-rules.md'),
       '--dangerously-skip-permissions',
     ])
-    expect(result.shellCommand).toContain(`cd ${join(home, 'coding-agent', 'workspace', 'default', 'openrouter')} &&`)
-    expect(result.shellCommand).toContain(join(result.rootDir, 'launch.sh'))
+    expect(result.shellCommand).toContain(join(home, 'coding-agent', 'workspace', 'default', 'openrouter'))
+    expect(result.shellCommand).toContain(join(result.rootDir, LAUNCHER_FILE))
     expect(result.shellCommand).not.toContain('ANTHROPIC_API_KEY')
     expect(result.shellCommand).not.toContain('hwui_')
     expect(result.shellCommand).not.toContain('--model')
-    const launcher = readFileSync(join(result.rootDir, 'launch.sh'), 'utf-8')
-    expect(launcher).toContain('exec claude --settings')
+    const launcher = readFileSync(join(result.rootDir, LAUNCHER_FILE), 'utf-8')
+    if (process.platform === 'win32') {
+      expect(launcher).toContain("'claude' '--settings'")
+    } else {
+      expect(launcher).toContain('exec claude --settings')
+    }
     expect(launcher).toContain('--dangerously-skip-permissions')
     expect(launcher).not.toContain('--model')
 
@@ -222,7 +253,7 @@ describe('coding agent launch preparation', () => {
       command: process.execPath,
       args: [join(process.cwd(), 'bin/hermes-studio-mcp.mjs'), 'api'],
       env: {
-        HERMES_WEB_UI_URL: 'http://127.0.0.1:8648',
+        HERMES_WEB_UI_URL: webUiOrigin,
         HERMES_WEB_UI_HOME: home,
         HERMES_WEBUI_STATE_DIR: home,
         HERMES_WEB_UI_PROFILE: 'default',
@@ -475,8 +506,12 @@ describe('coding agent launch preparation', () => {
       '--dangerously-skip-permissions',
     ])
     expect(result.shellCommand).not.toContain('--setting-sources local')
-    const launcher = readFileSync(join(result.rootDir, 'launch.sh'), 'utf-8')
-    expect(launcher).toContain('--setting-sources local')
+    const launcher = readFileSync(join(result.rootDir, LAUNCHER_FILE), 'utf-8')
+    if (process.platform === 'win32') {
+      expect(launcher).toContain("'--setting-sources' 'local'")
+    } else {
+      expect(launcher).toContain('--setting-sources local')
+    }
     expect(result.rootDir).toBe(join(home, 'coding-agent', 'model', 'default', 'openrouter', 'claude-code'))
   })
 
@@ -598,7 +633,7 @@ describe('coding agent launch preparation', () => {
     ))).toBe(false)
   })
 
-  it('uses Claude Code auto permission mode for scoped root launches', async () => {
+  it.skipIf(process.platform === 'win32')('uses Claude Code auto permission mode for scoped root launches', async () => {
     mockProcessUid(0)
     const home = makeHome()
 
@@ -623,7 +658,7 @@ describe('coding agent launch preparation', () => {
       '--permission-mode',
       'auto',
     ])
-    const launcher = readFileSync(join(result.rootDir, 'launch.sh'), 'utf-8')
+    const launcher = readFileSync(join(result.rootDir, LAUNCHER_FILE), 'utf-8')
     expect(launcher).toContain('--permission-mode auto')
     expect(launcher).not.toContain('--dangerously-skip-permissions')
     expect(result.rootDir).toBe(join(home, 'coding-agent', 'model', 'default', 'openrouter', 'claude-code'))
@@ -740,7 +775,7 @@ describe('coding agent launch preparation', () => {
 
     const config = readFileSync(join(result.rootDir, 'config.toml'), 'utf-8')
     expect(config).toContain('requires_openai_auth = false')
-    expect(config).toContain(`model_catalog_json = "${join(result.rootDir, 'codex-model-catalog.json')}"`)
+    expect(config).toContain(`model_catalog_json = ${JSON.stringify(join(result.rootDir, 'codex-model-catalog.json'))}`)
     expect(config).toContain('model_reasoning_summary = "auto"')
     expect(config).toContain('developer_instructions = """')
     expect(config).toContain('DechnicAuditor MCP usage')
@@ -751,11 +786,11 @@ describe('coding agent launch preparation', () => {
     expect(config).toContain('[mcp_servers.hermes-studio-api]')
     expect(config).toContain('[mcp_servers.hermes-studio-devices]')
     expect(config).toContain('[mcp_servers.hermes-studio-use]')
-    expect(config).toContain(`command = "${process.execPath}"`)
-    expect(config).toContain(`args = ["${join(process.cwd(), 'bin/hermes-studio-mcp.mjs')}", "api"]`)
-    expect(config).toContain(`args = ["${join(process.cwd(), 'bin/hermes-studio-mcp.mjs')}", "devices"]`)
-    expect(config).toContain(`args = ["${join(process.cwd(), 'bin/hermes-studio-mcp.mjs')}", "use"]`)
-    expect(config).toContain(`env = { HERMES_WEB_UI_URL = "http://127.0.0.1:8648", HERMES_WEB_UI_HOME = "${home}"`)
+    expect(config).toContain(`command = ${JSON.stringify(process.execPath)}`)
+    expect(config).toContain(`args = ${tomlStringArray([join(process.cwd(), 'bin/hermes-studio-mcp.mjs'), 'api'])}`)
+    expect(config).toContain(`args = ${tomlStringArray([join(process.cwd(), 'bin/hermes-studio-mcp.mjs'), 'devices'])}`)
+    expect(config).toContain(`args = ${tomlStringArray([join(process.cwd(), 'bin/hermes-studio-mcp.mjs'), 'use'])}`)
+    expect(config).toContain(`env = { HERMES_WEB_UI_URL = ${JSON.stringify(webUiOrigin)}, HERMES_WEB_UI_HOME = ${JSON.stringify(home)}`)
     expect(config).toContain('HERMES_WEBUI_STATE_DIR = "')
     expect(config).toContain('HERMES_WEB_UI_PROFILE = "default"')
     expect(config).toContain('HERMES_MCP_SERVER_NAME = "hermes-studio-api"')
@@ -792,7 +827,7 @@ describe('coding agent launch preparation', () => {
     })
 
     const config = readFileSync(join(result.rootDir, 'config.toml'), 'utf-8')
-    expect(config).toContain(`base_url = "http://127.0.0.1:8648/api/codex-proxy/`)
+    expect(config).toContain(`base_url = "${webUiOrigin}/api/codex-proxy/`)
     expect(config).toContain('wire_api = "responses"')
     expect(config).toContain('requires_openai_auth = false')
     expect(config).toMatch(/experimental_bearer_token = "hwui_[^"]+"/)
@@ -879,7 +914,7 @@ describe('coding agent launch preparation', () => {
     })
 
     const config = readFileSync(join(result.rootDir, 'config.toml'), 'utf-8')
-    expect(config).toContain(`base_url = "http://127.0.0.1:8648/api/codex-proxy/`)
+    expect(config).toContain(`base_url = "${webUiOrigin}/api/codex-proxy/`)
     expect(config).toMatch(/experimental_bearer_token = "hwui_[^"]+"/)
     expect(config).not.toContain('base_url = "https://api.openai.com/v1"')
     expect(dirname(dirname(result.rootDir))).toBe(join(home, 'coding-agent', 'model', 'default', 'openai-api', 'codex'))
@@ -898,7 +933,7 @@ describe('coding agent launch preparation', () => {
     })
 
     const config = readFileSync(join(result.rootDir, 'config.toml'), 'utf-8')
-    expect(config).toContain(`base_url = "http://127.0.0.1:8648/api/codex-proxy/`)
+    expect(config).toContain(`base_url = "${webUiOrigin}/api/codex-proxy/`)
     expect(config).toContain('wire_api = "responses"')
     expect(config).toContain('requires_openai_auth = false')
     expect(config).toMatch(/experimental_bearer_token = "hwui_[^"]+"/)

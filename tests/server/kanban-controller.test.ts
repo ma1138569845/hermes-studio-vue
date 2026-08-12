@@ -266,6 +266,7 @@ describe('kanban controller', () => {
   })
 
   it('lists and reads only attachments belonging to an authorized task', async () => {
+    vi.stubEnv('HERMES_HOME', '/Users/tester/.hermes')
     const storedPath = '/Users/tester/.hermes/kanban/attachments/task-1/report.html'
     mockGetTask.mockResolvedValue({
       task: { id: 'task-1', assignee: null, status: 'done' },
@@ -299,6 +300,7 @@ describe('kanban controller', () => {
     expect(readCtx.type).toBe('text/html')
     expect(headers['Content-Disposition']).toBe("attachment; filename*=UTF-8''report.html")
     expect(headers['X-Content-Type-Options']).toBe('nosniff')
+    vi.unstubAllEnvs()
   })
 
   it('proxies comment/log/diagnostics with explicit board context', async () => {

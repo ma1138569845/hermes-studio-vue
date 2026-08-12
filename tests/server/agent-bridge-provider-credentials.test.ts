@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 function runPython(script: string): Record<string, unknown> {
   try {
-    return JSON.parse(execFileSync('python3', ['-c', script], {
+    return JSON.parse(execFileSync(process.platform === 'win32' ? 'python' : 'python3', ['-c', script], {
       cwd: process.cwd(),
       encoding: 'utf8',
       stdio: 'pipe',

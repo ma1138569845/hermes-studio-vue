@@ -3,7 +3,7 @@ import { describe, it } from 'vitest'
 
 function runPython(script: string): void {
   try {
-    execFileSync('python3', ['-c', script], {
+    execFileSync(process.platform === 'win32' ? 'python' : 'python3', ['-c', script], {
       cwd: process.cwd(),
       encoding: 'utf-8',
       stdio: 'pipe',

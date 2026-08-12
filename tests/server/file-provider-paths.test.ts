@@ -2,6 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { join, resolve } from 'path'
 import { tmpdir } from 'os'
 import { mkdir, mkdtemp, rm, symlink } from 'fs/promises'
+
+function symlinkDir(target: string, path: string): Promise<void> {
+  return symlink(target, path, process.platform === 'win32' ? 'junction' : 'dir')
+}
 import { normalizePlatformPath, validatePath } from '../../packages/server/src/services/hermes/file-provider'
 import { isNearestExistingRealPathWithin, isPathWithin, isRealPathWithin, relativePathFromBase } from '../../packages/server/src/services/hermes/hermes-path'
 
@@ -63,8 +67,8 @@ describe('Hermes path containment helpers', () => {
 
       await mkdir(safeTarget, { recursive: true })
       await mkdir(outsideTarget, { recursive: true })
-      await symlink(safeTarget, safeLink)
-      await symlink(outsideTarget, outsideLink)
+      await symlinkDir(safeTarget, safeLink)
+      await symlinkDir(outsideTarget, outsideLink)
 
       await expect(isRealPathWithin(safeLink, workspaceBase)).resolves.toBe(true)
       await expect(isRealPathWithin(outsideLink, workspaceBase)).resolves.toBe(false)

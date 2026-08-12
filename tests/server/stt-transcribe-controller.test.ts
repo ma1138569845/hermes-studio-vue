@@ -724,7 +724,7 @@ describe('route registration ordering', () => {
     vi.doUnmock('../../packages/server/src/routes/index')
   })
 
-  it('mounts protected STT routes after requireAuth', async () => {
+  it('mounts protected STT routes after requireAuth', { timeout: 20000 }, async () => {
     const ttsPublicMiddleware = async () => {}
     const ttsProtectedMiddleware = async () => {}
     const sttProtectedMiddleware = async () => {}

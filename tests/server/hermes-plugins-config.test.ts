@@ -4,7 +4,9 @@ import { join } from 'path'
 import YAML from 'js-yaml'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-describe('Hermes plugin configuration', () => {
+describe.skipIf(process.platform === 'win32')('Hermes plugin configuration', () => {
+  // Fixture simulates a POSIX venv (`#!/bin/sh` shim at `.venv/bin/python`);
+  // Windows cannot spawn bare shell scripts, so the discovery chain is untestable there.
   const originalEnv = { ...process.env }
   let tempDir = ''
 

@@ -212,7 +212,7 @@ describe('bridge run final context usage', () => {
       profile: 'default',
       model: 'gpt-test',
       provider: 'openai',
-      workspace: '/tmp/hermes-bridge-final-context/default/workspace',
+      workspace: join('/tmp/hermes-bridge-final-context', 'default', 'workspace'),
       ended_at: 1_770_000_000,
       end_reason: 'complete',
     })
@@ -281,7 +281,7 @@ describe('bridge run final context usage', () => {
       profile: 'default',
       model: 'gpt-test',
       provider: 'openai',
-      workspace: '/tmp/hermes-bridge-final-context/default/workspace',
+      workspace: join('/tmp/hermes-bridge-final-context', 'default', 'workspace'),
     })
     const emit = vi.fn()
     const nsp = makeNamespace(emit)
@@ -356,7 +356,7 @@ describe('bridge run final context usage', () => {
       {
         model: 'gpt-test',
         provider: 'openai',
-        workspace: '/tmp/hermes-bridge-final-context/default/workspace',
+        workspace: join('/tmp/hermes-bridge-final-context', 'default', 'workspace'),
       },
     )
     expect(bridge.chat).toHaveBeenCalledWith(
@@ -876,7 +876,7 @@ describe('bridge run final context usage', () => {
     expect(createSessionMock).toHaveBeenCalledWith(expect.objectContaining({
       id: 'session-1',
       source: 'global_agent',
-      workspace: '/tmp/hermes-bridge-final-context/default/workspace',
+      workspace: join('/tmp/hermes-bridge-final-context', 'default', 'workspace'),
     }))
     expect(state.source).toBe('global_agent')
   })
@@ -1599,7 +1599,7 @@ describe('bridge run final context usage', () => {
       'default',
       expect.objectContaining({
         storage_message: '/plan build the feature',
-        workspace: '/tmp/hermes-bridge-final-context/default/workspace',
+        workspace: join('/tmp/hermes-bridge-final-context', 'default', 'workspace'),
       }),
     )
   })
@@ -1724,7 +1724,7 @@ describe('bridge run final context usage', () => {
       'default',
       expect.objectContaining({
         storage_message: '[IMPORTANT: expanded skill prompt]',
-        workspace: '/tmp/hermes-bridge-final-context/default/workspace',
+        workspace: join('/tmp/hermes-bridge-final-context', 'default', 'workspace'),
       }),
     )
   })

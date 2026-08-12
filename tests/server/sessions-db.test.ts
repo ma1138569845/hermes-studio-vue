@@ -1,4 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { join } from 'path'
+import { tmpdir } from 'os'
+
+const testProfileDir = join(tmpdir(), 'hermes-profile')
 
 const allMock = vi.fn()
 const indexAllMock = vi.fn()
@@ -15,7 +19,7 @@ const prepareMock = vi.fn((sql: string) => {
 })
 const closeMock = vi.fn()
 const databaseSyncMock = vi.fn(() => ({ prepare: prepareMock, close: closeMock }))
-const getActiveProfileDirMock = vi.fn(() => '/tmp/hermes-profile')
+const getActiveProfileDirMock = vi.fn(() => testProfileDir)
 
 vi.doMock('node:sqlite', () => ({
   DatabaseSync: databaseSyncMock,
@@ -38,7 +42,7 @@ describe('session DB summaries', () => {
     closeMock.mockClear()
     databaseSyncMock.mockClear()
     getActiveProfileDirMock.mockReset()
-    getActiveProfileDirMock.mockReturnValue('/tmp/hermes-profile')
+    getActiveProfileDirMock.mockReturnValue(testProfileDir)
   })
 
   it('queries sqlite for lightweight session summaries', async () => {
@@ -71,7 +75,7 @@ describe('session DB summaries', () => {
     const mod = await import('../../packages/server/src/db/hermes/sessions-db')
     const rows = await mod.listSessionSummaries(undefined, 50)
 
-    expect(databaseSyncMock).toHaveBeenCalledWith('/tmp/hermes-profile/state.db', { open: true, readOnly: true })
+    expect(databaseSyncMock).toHaveBeenCalledWith(join(testProfileDir, 'state.db'), { open: true, readOnly: true })
     expect(prepareMock).toHaveBeenCalledWith(expect.stringContaining("s.source != 'tool'"))
     expect(allMock).toHaveBeenCalledWith(200)
     expect(closeMock).toHaveBeenCalled()

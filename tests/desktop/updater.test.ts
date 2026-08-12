@@ -1,5 +1,10 @@
 import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+
+// Normalize line endings so multi-line assertions hold on Windows checkouts.
+function readSource(path: string): string {
+  return readFileSync(path, 'utf-8').replace(/\r\n/g, '\n')
+}
+import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { isWindowsUpdaterLockError, pendingUpdateDirectories } from '../../packages/desktop/src/main/updater-helpers'
 
@@ -16,15 +21,15 @@ describe('desktop updater helpers', () => {
       localAppData: 'C:\\Users\\A\\AppData\\Local',
       appName: 'DechnicAuditor',
     })).toEqual(expect.arrayContaining([
-      'C:\\Users\\A\\AppData\\Local/DechnicAuditor-updater/pending',
-      'C:\\Users\\A\\AppData\\Local/hermes-studio-updater/pending',
-      'C:\\Users\\A\\AppData\\Roaming/hermes-studio-updater/pending',
+      join('C:\\Users\\A\\AppData\\Local', 'DechnicAuditor-updater', 'pending'),
+      join('C:\\Users\\A\\AppData\\Local', 'hermes-studio-updater', 'pending'),
+      join('C:\\Users\\A\\AppData\\Roaming', 'hermes-studio-updater', 'pending'),
     ]))
   })
 
   it('checks on startup and from the tray without forcing an update', () => {
-    const updaterSource = readFileSync(resolve('packages/desktop/src/main/updater.ts'), 'utf-8')
-    const mainSource = readFileSync(resolve('packages/desktop/src/main/index.ts'), 'utf-8')
+    const updaterSource = readSource(resolve('packages/desktop/src/main/updater.ts'))
+    const mainSource = readSource(resolve('packages/desktop/src/main/index.ts'))
 
     expect(mainSource).toContain('checkForDesktopUpdates(true)')
     expect(updaterSource).toContain('checkForDesktopUpdates(false)')
@@ -36,8 +41,8 @@ describe('desktop updater helpers', () => {
   })
 
   it('gracefully stops the current app before starting a downloaded update', () => {
-    const updaterSource = readFileSync(resolve('packages/desktop/src/main/updater.ts'), 'utf-8')
-    const mainSource = readFileSync(resolve('packages/desktop/src/main/index.ts'), 'utf-8')
+    const updaterSource = readSource(resolve('packages/desktop/src/main/updater.ts'))
+    const mainSource = readSource(resolve('packages/desktop/src/main/index.ts'))
 
     expect(mainSource).toContain('async function prepareAppShutdown(): Promise<void>')
     expect(mainSource).toContain('await stopWebUiServer().catch(() => undefined)')

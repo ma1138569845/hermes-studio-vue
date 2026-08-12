@@ -3,7 +3,8 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-describe('Hermes plugin discovery environment', () => {
+describe.skipIf(process.platform === 'win32')('Hermes plugin discovery environment', () => {
+  // The fixture spawns executable `#!/bin/sh` shims inside a POSIX venv layout; Windows cannot run those.
   const originalEnv = { ...process.env }
   let tempDir = ''
 

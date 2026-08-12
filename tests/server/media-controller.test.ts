@@ -1,4 +1,5 @@
 import { join } from 'path'
+import { tmpdir } from 'os'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const originalWebUiHome = process.env.HERMES_WEB_UI_HOME
@@ -18,20 +19,21 @@ afterEach(() => {
 
 describe('media controller', () => {
   it('uses Hermes Web UI media directory as the default generated video output path', async () => {
-    process.env.HERMES_WEB_UI_HOME = '/tmp/hermes-web-ui-test-home'
+    const testHome = join(tmpdir(), 'hermes-web-ui-test-home')
+    process.env.HERMES_WEB_UI_HOME = testHome
     const { defaultImageOutputPath, defaultMediaOutputPath } = await import('../../packages/server/src/controllers/hermes/media')
 
-    expect(defaultMediaOutputPath('req_123')).toBe(join('/tmp/hermes-web-ui-test-home', 'media', 'req_123.mp4'))
-    expect(defaultMediaOutputPath('bad/request:id')).toBe(join('/tmp/hermes-web-ui-test-home', 'media', 'bad_request_id.mp4'))
-    expect(defaultImageOutputPath('img_123')).toBe(join('/tmp/hermes-web-ui-test-home', 'media', 'img_123.png'))
-    expect(defaultImageOutputPath('bad/request:id', 1)).toBe(join('/tmp/hermes-web-ui-test-home', 'media', 'bad_request_id-2.png'))
+    expect(defaultMediaOutputPath('req_123')).toBe(join(testHome, 'media', 'req_123.mp4'))
+    expect(defaultMediaOutputPath('bad/request:id')).toBe(join(testHome, 'media', 'bad_request_id.mp4'))
+    expect(defaultImageOutputPath('img_123')).toBe(join(testHome, 'media', 'img_123.png'))
+    expect(defaultImageOutputPath('bad/request:id', 1)).toBe(join(testHome, 'media', 'bad_request_id-2.png'))
   })
 
   it('generates images through the requested configured custom provider', async () => {
     vi.stubEnv('AGNES_API_KEY', 'agnes-secret')
     vi.doMock('../../packages/server/src/services/hermes/hermes-profile', () => ({
       getActiveProfileName: () => 'default',
-      getProfileDir: () => '/tmp/hermes-web-ui-test-profile',
+      getProfileDir: () => join(tmpdir(), 'hermes-web-ui-test-profile'),
       listProfileNamesFromDisk: () => ['default'],
     }))
     vi.doMock('../../packages/server/src/services/config-helpers', () => ({
@@ -60,7 +62,7 @@ describe('media controller', () => {
             provider: 'agnes',
             mode: 'text',
             prompt: 'make an icon',
-            output_path: '/tmp/hermes-web-ui-agnes-image.png',
+            output_path: join(tmpdir(), 'hermes-web-ui-agnes-image.png'),
           },
         },
         get: vi.fn(() => ''),
@@ -102,7 +104,7 @@ describe('media controller', () => {
     vi.stubEnv('AGNES_API_KEY', 'agnes-secret')
     vi.doMock('../../packages/server/src/services/hermes/hermes-profile', () => ({
       getActiveProfileName: () => 'default',
-      getProfileDir: () => '/tmp/hermes-web-ui-test-profile',
+      getProfileDir: () => join(tmpdir(), 'hermes-web-ui-test-profile'),
       listProfileNamesFromDisk: () => ['default'],
     }))
     vi.doMock('../../packages/server/src/services/config-helpers', () => ({
@@ -134,7 +136,7 @@ describe('media controller', () => {
             image_base64: 'aW1hZ2UtYnl0ZXM=',
             mime_type: 'image/png',
             store: true,
-            output_path: '/tmp/hermes-web-ui-agnes-reference-image.png',
+            output_path: join(tmpdir(), 'hermes-web-ui-agnes-reference-image.png'),
           },
         },
         get: vi.fn(() => ''),

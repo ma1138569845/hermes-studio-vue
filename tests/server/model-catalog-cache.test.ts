@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { resolve } from 'path'
 
 const {
   mockReadFile,
@@ -157,8 +158,9 @@ describe('model catalog cache', () => {
     mockGlobalFetch.mockResolvedValue({ ok: false, status: 404, json: async () => ({}) })
     vi.stubGlobal('fetch', mockGlobalFetch)
     mockReadFile.mockImplementation(async (path: string) => {
-      if (path === '/hermes/default/.env') return 'OPENROUTER_API_KEY=default-openrouter\n'
-      if (path === '/hermes/team/.env') {
+      const normalized = resolve(path)
+      if (normalized === resolve('/hermes/default/.env')) return 'OPENROUTER_API_KEY=default-openrouter\n'
+      if (normalized === resolve('/hermes/team/.env')) {
         return [
           'OPENROUTER_API_KEY=team-openrouter',
           'DEEPSEEK_API_KEY=team-deepseek',
@@ -413,8 +415,9 @@ describe('model catalog cache', () => {
       return { provider, ...credentials[provider] }
     })
     mockReadFile.mockImplementation(async (path: string) => {
-      if (path === '/hermes/default/.env') return ''
-      if (path === '/hermes/default/auth.json') {
+      const normalized = resolve(path)
+      if (normalized === resolve('/hermes/default/.env')) return ''
+      if (normalized === resolve('/hermes/default/auth.json')) {
         return JSON.stringify({
           providers: {
             'openai-codex': { tokens: { access_token: 'codex-token' } },
@@ -515,8 +518,9 @@ describe('model catalog cache', () => {
     mockListProfileNamesFromDisk.mockReturnValue(['default'])
     mockReadConfigYamlForProfile.mockResolvedValue({})
     mockReadFile.mockImplementation(async (path: string) => {
-      if (path === '/hermes/default/.env') return ''
-      if (path === '/hermes/default/auth.json') {
+      const normalized = resolve(path)
+      if (normalized === resolve('/hermes/default/.env')) return ''
+      if (normalized === resolve('/hermes/default/auth.json')) {
         return JSON.stringify({
           providers: {
             'minimax-oauth': {

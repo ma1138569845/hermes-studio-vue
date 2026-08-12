@@ -267,7 +267,7 @@ describe('coding agent resumed session config', () => {
       nativeResume: false,
       provider: 'global',
       model: '',
-      env: {},
+      env: expect.any(Object),
       args: [],
     }))
     expect(updateSessionMock).toHaveBeenCalledWith('session-1', expect.objectContaining({

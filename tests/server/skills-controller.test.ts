@@ -4,6 +4,10 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import { Readable } from 'stream'
 
+function symlinkDir(target: string, path: string): Promise<void> {
+  return symlink(target, path, process.platform === 'win32' ? 'junction' : 'dir')
+}
+
 const mockGetSkillUsageStatsFromDb = vi.hoisted(() => vi.fn())
 const mockGetActiveProfileName = vi.hoisted(() => vi.fn())
 const mockGetProfileDir = vi.hoisted(() => vi.fn())
@@ -173,7 +177,7 @@ describe('skills controller', () => {
     await mkdir(profileSkillsDir, { recursive: true })
     await mkdir(sharedSkillDir, { recursive: true })
     await writeFile(join(sharedSkillDir, 'SKILL.md'), '# Linked Flat Skill\nflat symlink copy\n', 'utf-8')
-    await symlink(sharedSkillDir, join(profileSkillsDir, 'linked-flat-skill'))
+    await symlinkDir(sharedSkillDir, join(profileSkillsDir, 'linked-flat-skill'))
 
     mockGetProfileDir.mockReturnValue(profileDir)
 
@@ -201,6 +205,7 @@ describe('skills controller', () => {
   it('lists Codex user and system skills for the codex target', async () => {
     const root = await mkdtemp(join(tmpdir(), 'hermes-web-ui-codex-skills-'))
     const previousHome = process.env.HOME
+    const previousUserProfile = process.env.USERPROFILE
     const userSkillDir = join(root, '.agents', 'skills', 'user-skill')
     const systemSkillDir = join(root, '.codex', 'skills', '.system', 'system-skill')
 
@@ -209,6 +214,7 @@ describe('skills controller', () => {
     await writeFile(join(userSkillDir, 'SKILL.md'), '# User Skill\nuser codex skill\n', 'utf-8')
     await writeFile(join(systemSkillDir, 'SKILL.md'), '# System Skill\nsystem codex skill\n', 'utf-8')
     process.env.HOME = root
+    process.env.USERPROFILE = root
 
     try {
       const { list } = await loadController()
@@ -229,6 +235,8 @@ describe('skills controller', () => {
     } finally {
       if (previousHome == null) delete process.env.HOME
       else process.env.HOME = previousHome
+      if (previousUserProfile == null) delete process.env.USERPROFILE
+      else process.env.USERPROFILE = previousUserProfile
       await rm(root, { recursive: true, force: true })
     }
   })
@@ -236,12 +244,14 @@ describe('skills controller', () => {
   it('reads Codex system skill details for the codex target', async () => {
     const root = await mkdtemp(join(tmpdir(), 'hermes-web-ui-codex-system-skill-'))
     const previousHome = process.env.HOME
+    const previousUserProfile = process.env.USERPROFILE
     const systemSkillDir = join(root, '.codex', 'skills', '.system', 'imagegen')
 
     await mkdir(join(systemSkillDir, 'references'), { recursive: true })
     await writeFile(join(systemSkillDir, 'SKILL.md'), '# Imagegen\nsystem image skill\n', 'utf-8')
     await writeFile(join(systemSkillDir, 'references', 'usage.md'), 'usage notes\n', 'utf-8')
     process.env.HOME = root
+    process.env.USERPROFILE = root
     mockListFilesRecursive.mockResolvedValue([
       { path: 'SKILL.md', isDir: false },
       { path: 'references/usage.md', isDir: false },
@@ -273,6 +283,8 @@ describe('skills controller', () => {
     } finally {
       if (previousHome == null) delete process.env.HOME
       else process.env.HOME = previousHome
+      if (previousUserProfile == null) delete process.env.USERPROFILE
+      else process.env.USERPROFILE = previousUserProfile
       await rm(root, { recursive: true, force: true })
     }
   })
@@ -290,10 +302,10 @@ describe('skills controller', () => {
     await writeFile(join(toolsDir, 'DESCRIPTION.md'), '# Tools\n', 'utf-8')
     await writeFile(join(linkedSkillDir, 'SKILL.md'), '# Linked Skill\nlinked skill copy\n', 'utf-8')
     await writeFile(join(linkedCategoryDir, 'SKILL.md'), '# Linked Category Skill\nlinked category copy\n', 'utf-8')
-    await symlink(linkedSkillDir, join(toolsDir, 'linked-skill'))
-    await symlink(linkedCategoryDir, join(toolsDir, 'linked-group'))
-    await symlink(toolsDir, join(toolsDir, 'loop'))
-    await symlink(linkedSkillDir, join(toolsDir, '.hidden-skill'))
+    await symlinkDir(linkedSkillDir, join(toolsDir, 'linked-skill'))
+    await symlinkDir(linkedCategoryDir, join(toolsDir, 'linked-group'))
+    await symlinkDir(toolsDir, join(toolsDir, 'loop'))
+    await symlinkDir(linkedSkillDir, join(toolsDir, '.hidden-skill'))
 
     mockGetProfileDir.mockReturnValue(profileDir)
 
@@ -478,6 +490,7 @@ describe('skills controller', () => {
   it('updates Codex user skills but not Codex system skills', async () => {
     const root = await mkdtemp(join(tmpdir(), 'hermes-web-ui-update-codex-skill-'))
     const previousHome = process.env.HOME
+    const previousUserProfile = process.env.USERPROFILE
     const userSkillDir = join(root, '.agents', 'skills', 'user-skill')
     const systemSkillDir = join(root, '.codex', 'skills', '.system', 'system-skill')
 
@@ -486,6 +499,7 @@ describe('skills controller', () => {
     await writeFile(join(userSkillDir, 'SKILL.md'), '# User Skill\n', 'utf-8')
     await writeFile(join(systemSkillDir, 'SKILL.md'), '# System Skill\n', 'utf-8')
     process.env.HOME = root
+    process.env.USERPROFILE = root
 
     try {
       const { updateSkill } = await loadController()
@@ -516,6 +530,10 @@ describe('skills controller', () => {
       expect(systemCtx.status).toBe(404)
       expect(systemCtx.body).toEqual({ error: 'Skill not found' })
     } finally {
+      if (previousHome == null) delete process.env.HOME
+      else process.env.HOME = previousHome
+      if (previousUserProfile == null) delete process.env.USERPROFILE
+      else process.env.USERPROFILE = previousUserProfile
       if (previousHome == null) delete process.env.HOME
       else process.env.HOME = previousHome
       await rm(root, { recursive: true, force: true })

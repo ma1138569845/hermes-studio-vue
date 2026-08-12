@@ -1,6 +1,7 @@
 import { createHash, generateKeyPairSync, sign } from 'crypto'
 import { createServer, type Server } from 'http'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { config } from '../../packages/server/src/config'
 import type { LanDeviceInfo } from '../../packages/server/src/services/lan-discovery'
 
 const keyPair = generateKeyPairSync('ed25519', {
@@ -283,7 +284,7 @@ describe('devices controller', () => {
 
     expect(ctx.body).toEqual({
       code: 'pair-secret',
-      link: 'http://192.168.1.88:8648/#/hermes/devices?pairing_code=pair-secret',
+      link: `http://192.168.1.88:${config.port}/#/hermes/devices?pairing_code=pair-secret`,
     })
   })
 

@@ -179,8 +179,13 @@ describe('agent bridge manager command resolution', () => {
   it('uses an isolated default bridge endpoint while running under Vitest', async () => {
     const { DEFAULT_AGENT_BRIDGE_ENDPOINT } = await import('../../packages/server/src/services/hermes/agent-bridge/client')
 
-    expect(DEFAULT_AGENT_BRIDGE_ENDPOINT).toContain(`hermes-agent-bridge-test-${process.pid}`)
-    expect(DEFAULT_AGENT_BRIDGE_ENDPOINT).not.toBe('ipc:///tmp/hermes-agent-bridge.sock')
+    if (process.platform === 'win32') {
+      expect(DEFAULT_AGENT_BRIDGE_ENDPOINT).toMatch(/^tcp:\/\/127\.0\.0\.1:\d+$/)
+      expect(DEFAULT_AGENT_BRIDGE_ENDPOINT).not.toBe('tcp://127.0.0.1:18765')
+    } else {
+      expect(DEFAULT_AGENT_BRIDGE_ENDPOINT).toContain(`hermes-agent-bridge-test-${process.pid}`)
+      expect(DEFAULT_AGENT_BRIDGE_ENDPOINT).not.toBe('ipc:///tmp/hermes-agent-bridge.sock')
+    }
   })
 
   it('honors the bridge connect retry environment override', async () => {
@@ -472,6 +477,10 @@ describe('agent bridge manager command resolution', () => {
 
       const stopping = manager.stop()
       await vi.advanceTimersByTimeAsync(25)
+      if (process.platform === 'win32') {
+        // Windows first asks the broker to shut down, so the force-kill timer is armed one step later.
+        await vi.advanceTimersByTimeAsync(25)
+      }
 
       expect(forceKillTree).toHaveBeenCalledWith(child)
       child.emit('exit', null, 'SIGKILL')
