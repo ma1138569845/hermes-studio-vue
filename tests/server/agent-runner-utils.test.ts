@@ -135,10 +135,20 @@ describe('coding agent completion errors', () => {
         content: [{ type: 'text', text: 'API Error: stream ended without terminal event' }],
       },
     })
+    // POSIX keeps a grandchild alive so the trailing error line lands after the
+    // parent exits with code 0. Windows signals EOF as soon as the direct child
+    // exits, so a delayed grandchild write can never be observed there; write
+    // the line before exiting instead and still verify the isApiErrorMessage
+    // terminal-state handling.
     writeFileSync(fixturePath, [
       "const { spawn } = require('child_process')",
-      `spawn(process.execPath, ['-e', ${JSON.stringify(`setTimeout(() => process.stdout.write(${JSON.stringify(`${nativeError}\n`)}), 75)`) }], { stdio: ['ignore', 1, 2] })`,
-      'process.exit(0)',
+      `const errorLine = ${JSON.stringify(`${nativeError}\n`)}`,
+      "if (process.platform === 'win32') {",
+      '  process.stdout.write(errorLine, () => process.exit(0))',
+      '} else {',
+      `  spawn(process.execPath, ['-e', ${JSON.stringify(`setTimeout(() => process.stdout.write(${JSON.stringify(`${nativeError}\n`)}), 75)`) }], { stdio: ['ignore', 1, 2] })`,
+      '  process.exit(0)',
+      '}',
     ].join('\n'))
 
     const manager = new CodingAgentRunManager()
