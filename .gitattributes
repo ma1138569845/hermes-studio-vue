@@ -1,0 +1,5 @@
+# CLI scripts must stay LF: a shebang must be the first bytes of the file,
+# and Windows checkouts (core.autocrlf) would otherwise rewrite it to CRLF,
+# which breaks both direct execution on some systems and Vite/vitest module
+# transforms that only strip a leading shebang before wrapping the source.
+bin/*.mjs text eol=lf
