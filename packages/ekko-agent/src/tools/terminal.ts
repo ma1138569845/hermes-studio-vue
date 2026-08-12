@@ -128,23 +128,35 @@ function splitCommandLine(command: string): string[] {
   let current = ''
   let quote: '"' | "'" | null = null
   let escaped = false
+  const trimmed = command.trim()
 
-  for (const char of command.trim()) {
+  for (let index = 0; index < trimmed.length; index += 1) {
+    const char = trimmed[index]
     if (escaped) {
       current += char
       escaped = false
       continue
     }
-    if (char === '\\') {
-      escaped = true
+    if (quote === "'") {
+      // POSIX single quotes are fully literal.
+      if (char === "'") quote = null
+      else current += char
       continue
     }
-    if (quote) {
-      if (char === quote) {
+    if (quote === '"') {
+      // POSIX double quotes keep backslashes literal except before $ ` " \ .
+      if (char === '"') {
         quote = null
+      } else if (char === '\\' && index + 1 < trimmed.length && '\\$`"'.includes(trimmed[index + 1])) {
+        current += trimmed[index + 1]
+        index += 1
       } else {
         current += char
       }
+      continue
+    }
+    if (char === '\\') {
+      escaped = true
       continue
     }
     if (char === '"' || char === "'") {

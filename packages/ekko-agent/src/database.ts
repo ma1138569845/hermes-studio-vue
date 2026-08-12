@@ -17,6 +17,7 @@ export class EkkoDatabaseManager {
   readonly databasePath: string
   private readonly development: boolean
   private database?: DatabaseSync
+  private closed = false
 
   constructor(options: EkkoDatabaseOptions = {}) {
     this.databasePath = options.databasePath || resolveEkkoDatabasePath(options)
@@ -24,6 +25,9 @@ export class EkkoDatabaseManager {
   }
 
   get connection(): DatabaseSync {
+    if (this.closed) {
+      throw new Error(`Ekko database is closed: ${this.databasePath}`)
+    }
     if (!this.database) {
       mkdirSync(dirname(this.databasePath), { recursive: true })
       this.database = new DatabaseSync(this.databasePath)
@@ -84,6 +88,8 @@ export class EkkoDatabaseManager {
   }
 
   close(): void {
+    if (this.closed) return
+    this.closed = true
     if (!this.database) return
     try {
       this.database.close()
