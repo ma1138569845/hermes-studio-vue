@@ -22,6 +22,8 @@ export interface RoomInfo {
     guestAgentApproval?: 'owner'
     maxGuestAgentsPerMember?: number
     allowRemoteWorkspaceAccess?: number
+    createdAt?: number
+    lastActiveAt?: number
 }
 
 export interface RoomSummaryConfig {
@@ -116,6 +118,8 @@ export interface ChatMessage {
     senderOwnerMemberId?: string
     content: string
     timestamp: number
+    /** Server-assigned persistence time used for room activity ordering. */
+    persistedAt?: number
     run_id?: string | null
     role?: string
     tool_call_id?: string | null
@@ -125,17 +129,24 @@ export interface ChatMessage {
     reasoning?: string | null
     reasoning_details?: string | null
     reasoning_content?: string | null
+    mentions?: GroupChatMention[]
     isStreaming?: boolean
     toolName?: string
     toolCallId?: string
     toolArgs?: unknown
     toolPreview?: string
     toolResult?: unknown
-    toolStatus?: 'running' | 'done' | 'error'
+    toolStatus?: 'running' | 'done' | 'error' | 'interrupted'
     workspaceChanges?: GroupWorkspaceDiffPayload[]
     firstSeenAt?: number
     attachments?: Array<{ id: string; name: string; type: string; size: number; url: string }>
     runItems?: ChatMessage[]
+}
+
+export interface GroupChatMention {
+    type: 'agent' | 'all'
+    participantId?: string
+    displayName: string
 }
 
 export interface GroupWorkspaceDiffFile {
@@ -175,6 +186,7 @@ export interface MemberInfo {
     description: string
     joinedAt: number
     avatar?: string
+    connectionStatus?: 'online' | 'offline'
 }
 
 export interface JoinResult {

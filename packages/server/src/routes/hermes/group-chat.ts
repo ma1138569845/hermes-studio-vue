@@ -43,13 +43,29 @@ groupChatPublicRoutes.post('/api/hermes/group-chat/invites/:code/agent-links/:re
 groupChatPublicRoutes.post('/api/hermes/group-chat/invites/:code/agent-links/:requestId/failure', agentLinkCtrl.failPairingHandoff)
 groupChatPublicRoutes.post('/api/hermes/group-chat/invites/:code/agent-links', agentLinkCtrl.requestPairing)
 groupChatPublicRoutes.get('/api/hermes/group-chat/invites/:code/agent-links/:requestId', agentLinkCtrl.pairingStatus)
+/**
+ * Perform a JSON action against the current Agent run's shared group workspace.
+ * Supported actions are list, read, write, mkdir, and delete. JSON write actions
+ * only update the workspace and do not publish an Agent attachment message.
+ */
 groupChatPublicRoutes.post('/api/hermes/group-chat/remote-workspace/v1', remoteWorkspaceCtrl.remoteWorkspaceAction)
+groupChatPublicRoutes.get('/api/hermes/group-chat/remote-workspace/v1/file', remoteWorkspaceCtrl.downloadRemoteWorkspaceFile)
+/**
+ * Upload a binary artifact to the current Agent run's shared group workspace.
+ * Returns its workspace path, checksum, generated attachment block, and messageId.
+ * A successful upload also publishes a separate Agent attachment message to the
+ * room with the workspace-relative path as its text body and the image/file block
+ * in the same attachment format used by the message composer.
+ */
+groupChatPublicRoutes.put('/api/hermes/group-chat/remote-workspace/v1/file', remoteWorkspaceCtrl.uploadRemoteWorkspaceFileContent)
 
 groupChatRoutes.get('/api/hermes/group-chat-link/v1/agents', agentLinkCtrl.localAgents)
 groupChatRoutes.get('/api/hermes/group-chat-link/v1/connections', agentLinkCtrl.localConnections)
 groupChatRoutes.post('/api/hermes/group-chat-link/v1/connect', agentLinkCtrl.connectLocalAgent)
 groupChatRoutes.post('/api/hermes/group-chat-link/v1/connect-handoff', agentLinkCtrl.connectLocalAgentHandoff)
 groupChatRoutes.put('/api/hermes/group-chat-link/v1/connections/:connectorId', agentLinkCtrl.updateLocalAgent)
+groupChatRoutes.put('/api/hermes/group-chat-link/v1/connections/:connectorId/room-alias', agentLinkCtrl.renameLocalRoom)
+groupChatRoutes.post('/api/hermes/group-chat-link/v1/connections/:connectorId/leave-room', agentLinkCtrl.leaveLocalRoom)
 groupChatRoutes.post('/api/hermes/group-chat-link/v1/disconnect', agentLinkCtrl.disconnectLocalAgent)
 groupChatRoutes.get('/api/hermes/group-chat/rooms/:roomId/agent-link-requests', agentLinkCtrl.pendingPairings)
 groupChatRoutes.post('/api/hermes/group-chat/rooms/:roomId/agent-link-requests/:requestId/decision', agentLinkCtrl.decidePairing)
@@ -241,12 +257,11 @@ function visibleRoomsForUser(storage: ReturnType<GroupChatServer['getStorage']>,
             isGroupChatRoomOwner(storage, room.id, user),
         ))
     }
-    const byId = new Map<string, any>()
+    const byId = new Map<string, { room: any; includeWorkspace: boolean }>()
     const addRoom = (room: any, includeWorkspace: boolean) => {
         if (!room) return
-        const canMentionAll = isGroupChatRoomOwner(storage, room.id, user)
-        if (byId.has(room.id) && includeWorkspace) byId.set(room.id, serializeRoom(room, true, canMentionAll))
-        else if (!byId.has(room.id)) byId.set(room.id, serializeRoom(room, includeWorkspace, canMentionAll))
+        const existing = byId.get(room.id)
+        if (!existing || includeWorkspace) byId.set(room.id, { room, includeWorkspace: includeWorkspace || existing?.includeWorkspace === true })
     }
     for (const room of storage.getRoomsForProfiles(userProfiles(user))) addRoom(room, true)
     if (typeof user.id === 'number') {
@@ -257,7 +272,13 @@ function visibleRoomsForUser(storage: ReturnType<GroupChatServer['getStorage']>,
             for (const room of storage.getRoomsForAuthUser(user.id)) addRoom(room, canManageRoom(storage, room.id, user))
         }
     }
-    return [...byId.values()].sort((a, b) => a.id.localeCompare(b.id))
+    return [...byId.values()]
+        .sort((a, b) => Number(b.room.lastActiveAt || 0) - Number(a.room.lastActiveAt || 0) || a.room.id.localeCompare(b.room.id))
+        .map(({ room, includeWorkspace }) => serializeRoom(
+            room,
+            includeWorkspace,
+            isGroupChatRoomOwner(storage, room.id, user),
+        ))
 }
 
 async function connectAndPersistRoomAgent(server: GroupChatServer, roomId: string, input: AgentInput, agentId = generateId()) {
@@ -600,6 +621,7 @@ groupChatRoutes.put('/api/hermes/group-chat/rooms/:roomId/invite-code', async (c
     }
 
     storage.updateRoomInviteCode(ctx.params.roomId, inviteCode)
+    chatServer.broadcastRoomMetadata(ctx.params.roomId)
     ctx.body = { success: true }
 })
 
