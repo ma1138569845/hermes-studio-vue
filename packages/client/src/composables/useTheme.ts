@@ -88,7 +88,7 @@ const brightness = ref<BrightnessMode>(
   (localStorage.getItem(BRIGHTNESS_KEY) as BrightnessMode) || 'system',
 )
 // Migrate legacy 'comic' style to 'formal' for users upgrading from older versions.
-const storedStyle = (localStorage.getItem(STYLE_KEY) as ThemeStyle) || 'ink'
+const storedStyle = (localStorage.getItem(STYLE_KEY) as ThemeStyle | 'comic') || 'ink'
 const style = ref<ThemeStyle>(storedStyle === 'comic' ? 'formal' : storedStyle)
 const isDark = ref(false)
 const isFormal = ref(false)
