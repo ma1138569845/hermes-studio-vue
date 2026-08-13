@@ -80,4 +80,7 @@ export const config = {
   corsOrigins: getCorsOrigins(),
   remoteRelay,
   appRelay,
+  // Upstream Hermes web_server (FastAPI) that hosts the knowledge-base HTTP API.
+  knowledgeUpstream: process.env.HERMES_KNOWLEDGE_UPSTREAM?.trim() || 'http://127.0.0.1:8080',
+  knowledgeToken: process.env.HERMES_KNOWLEDGE_TOKEN?.trim() || process.env.HERMES_DASHBOARD_SESSION_TOKEN?.trim() || '',
 }

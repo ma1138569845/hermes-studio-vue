@@ -196,6 +196,16 @@ const router = createRouter({
       name: 'hermes.mcp',
       component: () => import('@/views/hermes/McpManagerView.vue'),
     },
+    {
+      path: '/hermes/knowledge-base',
+      name: 'hermes.knowledgeBase',
+      component: () => import('@/views/hermes/KnowledgeBaseView.vue'),
+    },
+    {
+      path: '/hermes/knowledge-base/:kbId',
+      name: 'hermes.knowledgeBaseDetail',
+      component: () => import('@/views/hermes/KnowledgeBaseDetailView.vue'),
+    },
   ],
 })
 
