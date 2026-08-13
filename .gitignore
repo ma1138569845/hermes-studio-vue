@@ -55,3 +55,4 @@ packages/client/src/**/*.js
 
 # Local CCG/OMC tooling
 .omc/
+.freebuff/
