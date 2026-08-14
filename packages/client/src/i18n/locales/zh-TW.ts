@@ -198,6 +198,7 @@ export default {
     history: '歷史',
     jobs: '任務',
     kanban: '看板',
+    office: '辦公室',
     workflow: '工作流',
     models: '模型',
     profiles: '設定檔',
@@ -1128,6 +1129,36 @@ export default {
   },
 
   // 看板
+  // Office
+  office: {
+    title: '辦公室',
+    refresh: '重新整理',
+    filter: { all: '全部', open: '進行中', done: '已完成' },
+    decor: { kitchen: '茶水間', lounge: '休息區' },
+    status: { busy: '忙碌', online: '在線', offline: '離線' },
+    newTaskPrefix: '新任務',
+    ambient1: '這個任務的進展同步一下。',
+    ambient2: '幫忙看一下我這部分怎麼處理比較好？',
+    ambient3: '剛收到的資訊，跟你對一下口徑。',
+    ambient4: '上次說的事有結果了，過來看看。',
+    visitFallback: '有件事想跟你同步一下。',
+    unassigned: '未分配',
+    empty: { tasks: '暫無符合的任務' },
+    tab: { config: '設定', skills: '技能', memory: '記憶', tasks: '任務', archive: '封存', chat: '對話' },
+    agent: {
+      notes: '記憶筆記',
+      userProfile: '使用者檔案',
+      soulEmpty: '尚未寫入 SOUL。',
+      memoryEmpty: '尚無記憶筆記。',
+      userEmpty: '尚無使用者檔案。',
+      skillsEmpty: '沒有可用技能。',
+      tasksEmpty: '該 Agent 名下沒有未封存任務。',
+      archiveEmpty: '沒有封存任務。',
+      chatHint: '在對話中開啟「{name}」？將切換目前 Agent 並進入聊天。',
+      openChat: '開啟對話',
+    },
+  },
+
   kanban: {
     title: '看板',
     createTask: '新增任務',

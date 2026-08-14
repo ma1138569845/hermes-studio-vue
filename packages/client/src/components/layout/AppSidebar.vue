@@ -9,7 +9,6 @@ import RouteLinkItem from '@/components/common/RouteLinkItem.vue'
 import ModelSelector from "@/components/layout/ModelSelector.vue";
 import ProfileSelector from "@/components/layout/ProfileSelector.vue";
 import LanguageSwitch from "@/components/layout/LanguageSwitch.vue";
-import ThemeSwitch from "@/components/layout/ThemeSwitch.vue";
 import VersionManagementModal from "@/components/layout/VersionManagementModal.vue";
 import { changelog } from "@/data/changelog";
 import { getStoredUserId, getStoredUsername, isStoredSuperAdmin } from "@/api/client";
@@ -86,10 +85,6 @@ async function handleLogout() {
   window.location.reload();
 }
 
-function openChangelog() {
-  showChangelog.value = true;
-}
-
 function openVersionManagement() {
   showVersionManagement.value = true;
 }
@@ -135,6 +130,16 @@ function handleUpdateClick() {
               <rect x="17" y="3" width="5" height="18" rx="1" />
             </svg>
             <span>{{ t("sidebar.kanban") }}</span>
+          </RouteLinkItem>
+          <RouteLinkItem class="nav-item" :to="{ name: 'hermes.office' }" :active="selectedKey === 'hermes.office'">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="7" width="7" height="6" rx="1" />
+              <rect x="14" y="7" width="7" height="6" rx="1" />
+              <path d="M3 17h18" />
+              <path d="M6.5 13v4" />
+              <path d="M17.5 13v4" />
+            </svg>
+            <span>{{ t("sidebar.office") }}</span>
           </RouteLinkItem>
           <RouteLinkItem class="nav-item" :to="{ name: 'hermes.channels' }" :active="selectedKey === 'hermes.channels'">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">

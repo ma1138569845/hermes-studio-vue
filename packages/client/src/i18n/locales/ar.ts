@@ -198,6 +198,7 @@ export default {
     history: 'السجل',
     jobs: 'المهام المجدولة',
     kanban: 'كانبان',
+    office: 'المكتب',
     workflow: 'مسار العمل',
     models: 'النماذج',
     profiles: 'البروفايلات',
@@ -1133,6 +1134,36 @@ export default {
   },
 
   // Kanban
+  // Office
+  office: {
+    title: 'المكتب',
+    refresh: 'تحديث',
+    filter: { all: 'الكل', open: 'قيد التنفيذ', done: 'مكتمل' },
+    decor: { kitchen: 'غرفة الاستراحة', lounge: 'الصالة' },
+    status: { busy: 'مشغول', online: 'متصل', offline: 'غير متصل' },
+    newTaskPrefix: 'مهمة جديدة',
+    ambient1: 'مزامنة سريعة حول حالة هذه المهمة.',
+    ambient2: 'هل يمكنك إلقاء نظرة على كيفية التعامل مع هذا الجزء؟',
+    ambient3: 'وصلت معلومات جديدة — لنتبادل الرأي حولها.',
+    ambient4: 'الشيء الذي ناقشناه له نتيجة — تعال لترى.',
+    visitFallback: 'لديه شيء لمزامنته معك.',
+    unassigned: 'غير معيّن',
+    empty: { tasks: 'لا توجد مهام مطابقة' },
+    tab: { config: 'الإعداد', skills: 'المهارات', memory: 'الذاكرة', tasks: 'المهام', archive: 'الأرشيف', chat: 'المحادثة' },
+    agent: {
+      notes: 'ملاحظات الذاكرة',
+      userProfile: 'ملف المستخدم',
+      soulEmpty: 'لم يُكتب أي SOUL بعد.',
+      memoryEmpty: 'لا توجد ملاحظات ذاكرة بعد.',
+      userEmpty: 'لا يوجد ملف مستخدم بعد.',
+      skillsEmpty: 'لا توجد مهارات متاحة.',
+      tasksEmpty: 'لا توجد مهام غير مؤرشفة لهذا الوكيل.',
+      archiveEmpty: 'لا توجد مهام مؤرشفة.',
+      chatHint: 'فتح محادثة مع «{name}»؟ سيؤدي ذلك إلى تبديل الوكيل النشط ودخول الدردشة.',
+      openChat: 'فتح الدردشة',
+    },
+  },
+
   kanban: {
     title: 'لوحة كانبان',
     createTask: 'مهمة جديدة',

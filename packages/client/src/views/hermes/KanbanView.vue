@@ -178,6 +178,18 @@ watch(() => route.query.board, async () => {
   await applyBoardSelection(routeBoard(), false)
 })
 
+/** 支持从 ?task=<id> 打开指定任务（Office 台账跳转）。 */
+function openTaskFromQuery() {
+  const taskId = firstQueryString(route.query.task)
+  if (taskId && taskId !== selectedTaskId.value) {
+    selectedTaskId.value = taskId
+  }
+}
+
+watch(() => route.query.task, () => {
+  openTaskFromQuery()
+})
+
 onMounted(async () => {
   await Promise.all([
     kanbanStore.fetchBoards(),
@@ -187,6 +199,7 @@ onMounted(async () => {
   await applyBoardSelection(routeBoard(), true, true)
   kanbanStore.startEventStream()
   routeReady.value = true
+  openTaskFromQuery()
   refreshTimer.value = setInterval(() => {
     if (document.visibilityState === 'visible') {
       void Promise.all([kanbanStore.fetchBoards(), kanbanStore.fetchTasks(true), kanbanStore.fetchStats()])
@@ -205,6 +218,9 @@ function handleTaskClick(taskId: string) {
 
 function handleDrawerClose() {
   selectedTaskId.value = null
+  if (firstQueryString(route.query.task)) {
+    void router.replace({ query: { ...route.query, task: undefined } })
+  }
 }
 
 async function handleDrawerUpdated() {

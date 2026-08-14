@@ -112,16 +112,23 @@ function bodyHasProfileSelector(body: BodyInit | null | undefined): boolean {
   }
 }
 
+function isGlobalOfficePath(pathname: string): boolean {
+  // Office 动作队列是全局的（跨 agent），不随活动 profile 切换。
+  return pathname.startsWith('/api/hermes/office')
+}
+
 function shouldAttachProfileHeader(path: string, options: RequestInit): boolean {
   try {
     const url = new URL(path, 'http://hermes.local')
     if (url.searchParams.has('profile')) return false
     if (url.pathname.startsWith('/api/hermes/profiles')) return false
     if (url.pathname.startsWith('/api/theme')) return false
+    if (isGlobalOfficePath(url.pathname)) return false
     if (isProfileWideSessionCollection(url.pathname)) return false
   } catch {
     if (path.startsWith('/api/hermes/profiles')) return false
     if (path.startsWith('/api/theme')) return false
+    if (isGlobalOfficePath(path.split('?')[0] || path)) return false
     if (isProfileWideSessionCollection(path.split('?')[0] || path)) return false
   }
   return !bodyHasProfileSelector(options.body)
@@ -189,8 +196,10 @@ export async function request<T>(path: string, options: RequestInit = {}): Promi
   }
 
   // Inject active profile header for request-scoped endpoints. Explicit profile
-  // selectors in the URL/body and profile-name routes are validated directly.
-  const profileName = getActiveProfileName()
+  // selectors in the URL/body, an explicit header, and profile-name routes are
+  // respected over the active profile.
+  const explicitProfileHeader = (options.headers as Record<string, string> | undefined)?.['X-Hermes-Profile']
+  const profileName = explicitProfileHeader || getActiveProfileName()
   if (profileName && shouldAttachProfileHeader(path, options)) {
     headers['X-Hermes-Profile'] = profileName
   }

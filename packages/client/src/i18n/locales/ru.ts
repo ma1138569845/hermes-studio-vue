@@ -124,6 +124,7 @@ export default {
     history: 'История',
     jobs: 'Задачи',
     kanban: 'Канбан',
+    office: 'Офис',
     workflow: 'Рабочий процесс',
     models: 'Модели',
     profiles: 'Профили',
@@ -981,6 +982,36 @@ export default {
     newNodeTitle: 'Узел {count}',
   },
 
+
+  // Office
+  office: {
+    title: 'Офис',
+    refresh: 'Обновить',
+    filter: { all: 'Все', open: 'В работе', done: 'Завершено' },
+    decor: { kitchen: 'Комната отдыха', lounge: 'Лаундж' },
+    status: { busy: 'Занят', online: 'В сети', offline: 'Не в сети' },
+    newTaskPrefix: 'Новая задача',
+    ambient1: 'Быстрая сверка по статусу этой задачи.',
+    ambient2: 'Посмотрите, как мне лучше обработать эту часть?',
+    ambient3: 'Только что поступила информация — давайте согласуем.',
+    ambient4: 'У того, что мы обсуждали, есть результат — подойдите.',
+    visitFallback: 'Есть что с вами согласовать.',
+    unassigned: 'Не назначено',
+    empty: { tasks: 'Нет подходящих задач' },
+    tab: { config: 'Конфигурация', skills: 'Навыки', memory: 'Память', tasks: 'Задачи', archive: 'Архив', chat: 'Чат' },
+    agent: {
+      notes: 'Заметки памяти',
+      userProfile: 'Профиль пользователя',
+      soulEmpty: 'SOUL ещё не записан.',
+      memoryEmpty: 'Заметок памяти пока нет.',
+      userEmpty: 'Профиля пользователя пока нет.',
+      skillsEmpty: 'Нет доступных навыков.',
+      tasksEmpty: 'Нет неархивированных задач для этого агента.',
+      archiveEmpty: 'Нет архивированных задач.',
+      chatHint: 'Открыть разговор с «{name}»? Это переключит активного агента и войдёт в чат.',
+      openChat: 'Открыть чат',
+    },
+  },
 
   kanban: {
     title: 'Канбан',
