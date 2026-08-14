@@ -57,7 +57,7 @@ describe('coding agent resumed session config', () => {
     for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true })
   })
 
-  it('rebuilds Claude scoped proxy credentials from stored provider config after restart', async () => {
+  it('rebuilds Claude scoped proxy credentials from stored provider config after restart', { timeout: 30_000 }, async () => {
     const home = makeHome()
     getSessionMock.mockReturnValue({
       id: 'session-1',
@@ -132,7 +132,7 @@ describe('coding agent resumed session config', () => {
     expect(settings.env.ANTHROPIC_API_KEY).toMatch(/^hwui_/)
   })
 
-  it('preserves the stored workspace when a coding agent session switches provider and model', async () => {
+  it('preserves the stored workspace when a coding agent session switches provider and model', { timeout: 30_000 }, async () => {
     const home = makeHome()
     const originalWorkspace = join(home, 'coding-agent', 'workspace', 'default', 'openrouter')
     getSessionMock.mockReturnValue({

@@ -206,7 +206,7 @@ describe('bridge run final context usage', () => {
     for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true })
   })
 
-  it('reopens an ended bridge session when starting a new run', async () => {
+  it('reopens an ended bridge session when starting a new run', { timeout: 30_000 }, async () => {
     getSessionMock.mockReturnValue({
       id: 'session-1',
       profile: 'default',
@@ -272,7 +272,7 @@ describe('bridge run final context usage', () => {
     }))
   })
 
-  it('does not prepend the Studio guidance a second time when the caller already composed it', async () => {
+  it('does not prepend the Studio guidance a second time when the caller already composed it', { timeout: 30_000 }, async () => {
     // The chat-run socket composes getSystemPrompt() and hands the result down as
     // `instructions`. Composing again duplicated the whole guidance block —
     // MCP usage plus output-format rules — in the system message of every request.

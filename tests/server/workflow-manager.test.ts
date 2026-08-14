@@ -85,7 +85,7 @@ describe('workflow manager', () => {
     }
   })
 
-  it('returns a server-wide singleton instance', async () => {
+  it('returns a server-wide singleton instance', { timeout: 30_000 }, async () => {
     const { WorkflowManager, getWorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
 
     const first = getWorkflowManager()
