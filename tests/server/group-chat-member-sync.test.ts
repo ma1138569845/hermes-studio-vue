@@ -782,7 +782,12 @@ describe('Group Chat member/agent identity sync', () => {
     expect(updateRoomTotalTokens).not.toHaveBeenCalled()
     expect(roomEmit).toHaveBeenCalledWith('context_status', expect.objectContaining({ roomId: 'room-1', agentName: 'Worker', status: 'replying' }))
     expect(broadcastEmit).not.toHaveBeenCalledWith('room_updated', expect.anything())
-    expect(broadcastEmit).toHaveBeenCalledWith('message_stream_start', expect.objectContaining({ id: 'current-stream', senderName: 'Worker' }))
+    expect(broadcastEmit).toHaveBeenCalledWith('message_stream_start', expect.objectContaining({
+      id: 'current-stream',
+      senderId: 'agent-stable-1',
+      senderAgentRecordId: 'row-1',
+      senderName: 'Worker',
+    }))
   })
 
   it('accepts side-channel events for the persisted non-Hermes runtime session', () => {
@@ -833,7 +838,12 @@ describe('Group Chat member/agent identity sync', () => {
 
     expect(broadcastEmit).toHaveBeenCalledWith(
       'message_stream_start',
-      expect.objectContaining({ id: 'ekko-stream', senderName: 'ekko-agent' }),
+      expect.objectContaining({
+        id: 'ekko-stream',
+        senderId: 'agent-ekko-1',
+        senderAgentRecordId: 'row-ekko-1',
+        senderName: 'ekko-agent',
+      }),
     )
   })
 
@@ -1630,7 +1640,7 @@ describe('Group Chat member/agent identity sync', () => {
     expect(ctx.body).toEqual({ rooms: [expect.objectContaining({ id: 'room-1', inviteCode: null, canManage: true })] })
   })
 
-  it('routes @mentions from users and only trusts server-bound agent continuation metadata', () => {
+  it('routes trusted @mentions and always checks persisted public messages', async () => {
     const server = Object.create(GroupChatServer.prototype) as any
     const emit = vi.fn()
     server.rooms = new Map([
@@ -1653,7 +1663,8 @@ describe('Group Chat member/agent identity sync', () => {
       ['human-1', { name: 'Human', description: '' }],
       ['agent-1', { name: '丫鬟', description: '' }],
     ])
-    server.agentClients = { processMentions: vi.fn(async () => undefined) }
+    const processSummaryCheck = vi.fn(async () => undefined)
+    server.agentClients = { processMentions: vi.fn(async () => undefined), processSummaryCheck }
     const agentSessionId = groupBridgeSessionId('room-1', 'default', '丫鬟', 'seed-1')
     server.storage = {
       getRoom: vi.fn(() => ({ id: 'room-1', name: 'Room', sessionSeed: 'seed-1' })),
@@ -1710,6 +1721,7 @@ describe('Group Chat member/agent identity sync', () => {
       mentions: [{ type: 'agent', participantId: 'agent-2', displayName: 'Reviewer' }],
     }, vi.fn())
     expect(server.agentClients.processMentions).not.toHaveBeenCalled()
+    await vi.waitFor(() => expect(processSummaryCheck).toHaveBeenCalledTimes(3))
 
     server.handleMessage({ id: 'agent-socket' }, {
       id: 'forged-agent-message',
