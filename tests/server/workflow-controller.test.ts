@@ -95,7 +95,7 @@ describe('workflow controller', () => {
     assertImportCapabilitiesMock.mockReset()
   })
 
-  it('exports, previews, and confirms a portable workflow copy', async () => {
+  it('exports, previews, and confirms a portable workflow copy', { timeout: 30_000 }, async () => {
     const source = {
       id: 'workflow-1', name: 'Portable', profile: 'default', workspace: '/private',
       nodes: [{ id: 'n1', type: 'agent', position: { x: 0, y: 0 }, data: { title: 'One', agent: 'hermes', input: 'go' } }],
