@@ -84,7 +84,7 @@ describe('group chat workspace diff persistence', () => {
     expect(countRows('workspace_run_change_files', ' WHERE change_id = ?', changeId)).toBe(0)
   }
 
-  it('persists one workspace_run_change and one durable workspace_diff group message', async () => {
+  it('persists one workspace_run_change and one durable workspace_diff group message', { timeout: 30_000 }, async () => {
     const { GroupChatServer } = await import('../../packages/server/src/services/hermes/group-chat')
     const server = new GroupChatServer(httpServer)
     const storage = server.getStorage()

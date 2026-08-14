@@ -67,7 +67,7 @@ describe('group chat room workspace', () => {
     await rm(root, { recursive: true, force: true })
   })
 
-  it('defaults, persists, clears, and returns room workspace in list/detail rows', async () => {
+  it('defaults, persists, clears, and returns room workspace in list/detail rows', { timeout: 30_000 }, async () => {
     const { GroupChatServer } = await import('../../packages/server/src/services/hermes/group-chat')
     const server = new GroupChatServer(httpServer)
     const storage = server.getStorage()

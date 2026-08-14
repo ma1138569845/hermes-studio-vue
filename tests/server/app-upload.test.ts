@@ -1,6 +1,6 @@
 import { mkdtemp, readFile, rm } from 'fs/promises'
 import { tmpdir } from 'os'
-import { join } from 'path'
+import { basename, dirname, join } from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 let uploadRoot = ''
@@ -41,7 +41,8 @@ describe('App chunked uploads', () => {
 
     const completed = await completeAppUpload({ id, owner: '7', profile: 'default' })
     expect(completed.name).toBe('photo.png')
-    expect(completed.path).toMatch(/default\/[^/]+\.png$/)
+    expect(basename(dirname(completed.path))).toBe('default')
+    expect(basename(completed.path)).toMatch(/^[a-z0-9]+\.png$/)
     expect(await readFile(completed.path)).toEqual(Buffer.from([1, 2, 3, 4, 5]))
   })
 

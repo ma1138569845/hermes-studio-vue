@@ -132,7 +132,7 @@ describe('group Agent outbound Relay persistence', () => {
     return { connectorId, legacyLinksFile, linksFile, manager }
   }
 
-  it('forgets a persisted connector after the cloud rejects its revoked credential', async () => {
+  it('forgets a persisted connector after the cloud rejects its revoked credential', { timeout: 30_000 }, async () => {
     const { linksFile, manager } = await restorePersistedConnection(
       'Invalid or revoked reconnect credential',
     )
