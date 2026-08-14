@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import multiavatar from '@multiavatar/multiavatar'
+import { businessAvatarSvg, isLegacyCartoonAvatarDataUrl } from '@/utils/business-avatar'
 import type { ProfileAvatar } from '@/api/hermes/profiles'
 
 const props = withDefaults(defineProps<{
@@ -12,7 +12,16 @@ const props = withDefaults(defineProps<{
 })
 
 const fallbackSeed = computed(() => props.name || 'default')
-const generatedSvg = computed(() => multiavatar(props.avatar?.seed || fallbackSeed.value))
+// Legacy multiavatar SVG data URLs (stored before the business-avatar
+// switch) render as cartoon faces; fall back to the business initial.
+const effectiveAvatar = computed<ProfileAvatar | null>(() => {
+  const avatar = props.avatar
+  if (avatar?.type === 'image' && avatar.dataUrl && isLegacyCartoonAvatarDataUrl(avatar.dataUrl)) {
+    return null
+  }
+  return avatar || null
+})
+const generatedSvg = computed(() => businessAvatarSvg(props.name || 'default', props.avatar?.seed || fallbackSeed.value))
 const style = computed(() => ({
   width: `${props.size}px`,
   height: `${props.size}px`,
@@ -23,9 +32,9 @@ const style = computed(() => ({
 <template>
   <span class="profile-avatar-view" :style="style">
     <img
-      v-if="avatar?.type === 'image' && avatar.dataUrl"
+      v-if="effectiveAvatar?.type === 'image' && effectiveAvatar.dataUrl"
       class="profile-avatar-image"
-      :src="avatar.dataUrl"
+      :src="effectiveAvatar.dataUrl"
       alt=""
       draggable="false"
     >

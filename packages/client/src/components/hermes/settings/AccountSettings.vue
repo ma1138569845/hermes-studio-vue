@@ -5,7 +5,7 @@ import { useI18n } from "vue-i18n";
 import { changePassword, changeUsername, fetchCurrentUser, fetchLockedIps, unlockSpecificIp, unlockAllIps, fetchMyAvatar, updateMyAvatar, resetMyAvatar } from "@/api/auth";
 import type { LockedIp, UserAvatar } from "@/api/auth";
 import ProfileAvatar from "@/components/hermes/profiles/ProfileAvatar.vue";
-import multiavatar from "@multiavatar/multiavatar";
+import { businessAvatarDataUrl } from "@/utils/business-avatar";
 
 const { t } = useI18n();
 const message = useMessage();
@@ -89,8 +89,7 @@ async function handleRandomAvatar() {
       ? crypto.randomUUID()
       : Math.random().toString(36).slice(2)
     const seed = `${username.value || 'default'}-${Date.now()}-${randomPart}`
-    const svg = multiavatar(seed)
-    const dataUrl = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svg)))
+    const dataUrl = businessAvatarDataUrl(username.value || 'default', seed)
     await updateMyAvatar({ type: 'image', dataUrl, seed })
     avatar.value = { type: 'image', dataUrl, seed }
     message.success(t('settings.userAvatar.saveSuccess'))
