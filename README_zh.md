@@ -317,6 +317,42 @@ docker compose logs -f hermes-webui
 
 更详细的说明与排错见：[`docs/docker.md`](./docs/docker.md)
 
+### Windows 离线部署
+
+目标机器无法使用 Docker、或需要部署自定义构建（如内部定制分支）时，可在源机器打包产物，
+再到 Windows 目标机器一键安装，适合 Windows 服务器 / 内网自托管。
+
+**① 源机器打包：**
+
+```bash
+npm run build
+npm pack --ignore-scripts   # 生成 hermes-web-ui-<version>.tgz
+```
+
+> 需加 `--ignore-scripts`：`prepare` 脚本使用 POSIX 语法（`[ -d dist ]`），在 Windows 的
+> `cmd.exe` 下会失败；`dist/` 已构建完成，跳过不影响产物。
+
+**② 将 `hermes-web-ui-<version>.tgz` 与 `deploy-windows.ps1` 拷贝到目标机器同一目录。**
+
+**③ 目标机器（需已装 Node.js ≥ 23；聊天功能还需 `pip install hermes-agent`）以管理员身份运行：**
+
+```powershell
+.\deploy-windows.ps1
+```
+
+脚本依次完成：环境检查 → 全局安装 → 设置机器级环境变量 → Hermes 运行时探测 → 防火墙放行
+`8648` → 注册开机自启 → 启动服务并做健康检查。
+
+常用参数：
+
+```powershell
+.\deploy-windows.ps1 -Port 8648                             # 自定义端口
+.\deploy-windows.ps1 -BridgePython "D:\python\python.exe"   # hermes 不在 PATH 时指定对应 python
+.\deploy-windows.ps1 -SkipAutoStart                         # 不注册开机自启
+```
+
+部署后访问 `http://<目标机器IP>:8648`，默认登录 `admin` / `123456`。
+
 ### Hermes Agent 运行时发现
 
 Web UI 启动后端聊天能力时，会优先使用包含 `run_agent.py` 的源码目录，例如

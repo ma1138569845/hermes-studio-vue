@@ -295,6 +295,7 @@ function openTaskInKanban(task: KanbanTask): void {
 }
 
 .office-agent-body {
+  max-height: 44vh;
   overflow-y: auto;
 }
 

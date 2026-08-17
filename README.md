@@ -312,6 +312,43 @@ Open **http://localhost:6060**
 
 For detailed notes and troubleshooting, see [`docs/docker.md`](./docs/docker.md).
 
+### Windows Offline Deploy
+
+When the target machine has no Docker, or you need to ship a custom build (e.g. an internal
+fork), build the artifacts on the source machine and install them on the Windows target with a
+single script. Intended for Windows servers and intranet self-hosting.
+
+**① Build the tarball on the source machine:**
+
+```bash
+npm run build
+npm pack --ignore-scripts   # produces hermes-web-ui-<version>.tgz
+```
+
+> `--ignore-scripts` is required: the `prepare` script uses POSIX syntax (`[ -d dist ]`), which
+> fails under Windows `cmd.exe`; `dist/` is already built, so skipping it is safe.
+
+**② Copy `hermes-web-ui-<version>.tgz` and `deploy-windows.ps1` to the same directory on the target.**
+
+**③ On the target (Node.js ≥ 23 required; chat features also need `pip install hermes-agent`), run as administrator:**
+
+```powershell
+.\deploy-windows.ps1
+```
+
+The script performs: environment checks → global install → machine-level env vars → Hermes runtime
+detection → firewall rule for `8648` → boot auto-start task → start + health check.
+
+Common options:
+
+```powershell
+.\deploy-windows.ps1 -Port 8648                             # custom port
+.\deploy-windows.ps1 -BridgePython "D:\python\python.exe"   # point to a python with hermes-agent
+.\deploy-windows.ps1 -SkipAutoStart                         # skip boot auto-start
+```
+
+After deployment open `http://<target-ip>:8648`; default login is `admin` / `123456`.
+
 ### Hermes Agent Runtime Discovery
 
 When Web UI starts backend chat features, it prefers a source checkout that
