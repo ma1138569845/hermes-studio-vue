@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, h, onMounted, onUnmounted, ref, watch } from 'vue'
-import { NButton, NDataTable, NEmpty, NModal, NPopconfirm, NSpin, NTabPane, NTabs, NTag, useMessage } from 'naive-ui'
+import { NAlert, NButton, NDataTable, NEmpty, NModal, NPopconfirm, NSpin, NTabPane, NTabs, NTag, useMessage } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import QRCode from 'qrcode'
@@ -10,21 +10,32 @@ import {
   deleteAppConnection,
   fetchAppConnections,
   type AppConnection,
+  type AppConnectionAccessFailure,
   type CloudAppAuthorizationResponse,
   type LanAppAuthorizationResponse,
 } from '@/api/hermes/app-connections'
 
+const DISMISSED_ACCESS_FAILURE_KEY = 'hermes:app-access-failure-dismissed-at'
+const HSTUDIO_GITHUB_ANDROID_DOWNLOAD_URL = 'https://github.com/EKKOLearnAI/hermes-studio/releases/download/v1.0.0/HStudio.apk'
+const HSTUDIO_CLOUDFLARE_ANDROID_DOWNLOAD_URL = 'https://download.ekkolearnai.com/v1.0.0/HStudio.apk'
+const HSTUDIO_APP_VERSION = 'v1.0.0'
+
 const { t } = useI18n()
 const message = useMessage()
 const loading = ref(false)
+const panelView = ref<'list' | 'download'>('list')
+const downloadSource = ref<'github' | 'cloudflare'>('cloudflare')
 const connections = ref<AppConnection[]>([])
+const accessFailure = ref<AppConnectionAccessFailure | null>(null)
+const dismissedAccessFailureAt = ref(readDismissedAccessFailureAt())
 const showScanModal = ref(false)
 const connectionTab = ref<'lan' | 'cloud'>('lan')
-const authorizationLoading = ref(false)
+const authorizationLoading = ref<Record<'lan' | 'cloud', boolean>>({ lan: false, cloud: false })
 const deletingConnectionId = ref<number | null>(null)
 const lanAuthorization = ref<LanAppAuthorizationResponse | null>(null)
 const cloudAuthorization = ref<CloudAppAuthorizationResponse | null>(null)
 const qrCodeDataUrls = ref<Record<'lan' | 'cloud', string>>({ lan: '', cloud: '' })
+const downloadQrCodeDataUrl = ref('')
 const currentTimestamp = ref(Math.floor(Date.now() / 1000))
 let countdownTimer: ReturnType<typeof setInterval> | null = null
 let connectionPollTimer: ReturnType<typeof setInterval> | null = null
@@ -33,6 +44,9 @@ let connectionsRequestInFlight = false
 
 const CONNECTION_POLL_INTERVAL_MS = 3_000
 
+const androidDownloadUrl = computed(() => downloadSource.value === 'cloudflare'
+  ? HSTUDIO_CLOUDFLARE_ANDROID_DOWNLOAD_URL
+  : HSTUDIO_GITHUB_ANDROID_DOWNLOAD_URL)
 const activeAuthorization = computed(() => connectionTab.value === 'lan'
   ? lanAuthorization.value
   : cloudAuthorization.value)
@@ -46,6 +60,32 @@ const remainingTime = computed(() => {
   const minutes = Math.floor(remainingSeconds.value / 60).toString().padStart(2, '0')
   const seconds = (remainingSeconds.value % 60).toString().padStart(2, '0')
   return `${minutes}:${seconds}`
+})
+const accessFailureReason = computed(() => {
+  const failure = accessFailure.value
+  if (!failure) return ''
+  if (failure.plan === 'internal' || failure.plan === 'public_beta') {
+    return t('connections.app.accessFailures.tokenExpired')
+  }
+  if (failure.plan === 'paid' && failure.code === 'app_entitlement_expired') {
+    if (failure.tokenTtlSeconds === 0) {
+      return t('connections.app.accessFailures.paidAccountRequired')
+    }
+    return t('connections.app.accessFailures.tokenExpired')
+  }
+  const reasonKeys: Record<string, string> = {
+    app_entitlement_required: 'required',
+    app_entitlement_invalid: 'invalid',
+    app_entitlement_expired: 'expired',
+    app_entitlement_account_mismatch: 'accountMismatch',
+    app_entitlement_device_mismatch: 'deviceMismatch',
+  }
+  return t(`connections.app.accessFailures.${reasonKeys[failure.code] || 'unknown'}`)
+})
+const accessFailureMode = computed(() => {
+  const plan = accessFailure.value?.plan || 'unknown'
+  const knownPlan = plan === 'internal' || plan === 'public_beta' || plan === 'paid' ? plan : 'unknown'
+  return t(`connections.app.accessModes.${knownPlan}`)
 })
 
 const columns = computed<DataTableColumns<AppConnection>>(() => [
@@ -145,7 +185,7 @@ const columns = computed<DataTableColumns<AppConnection>>(() => [
 ])
 
 function connectionIdentity(connection: AppConnection): string {
-  return `${connection.device_code}:${connection.connection_type}`
+  return `${connection.device_code}:${connection.connection_type}:${connection.cloud_user_id}`
 }
 
 async function loadConnections(options: { silent?: boolean; detectScanConnection?: boolean } = {}) {
@@ -155,6 +195,10 @@ async function loadConnections(options: { silent?: boolean; detectScanConnection
   try {
     const response = await fetchAppConnections()
     connections.value = response.connections
+    const nextFailure = response.access_failure || null
+    accessFailure.value = nextFailure && nextFailure.occurredAt > dismissedAccessFailureAt.value
+      ? nextFailure
+      : null
     if (options.detectScanConnection && showScanModal.value) {
       const connected = response.connections.some(connection => (
         connection.active
@@ -176,6 +220,28 @@ async function loadConnections(options: { silent?: boolean; detectScanConnection
   }
 }
 
+function readDismissedAccessFailureAt(): number {
+  try {
+    const value = Number(localStorage.getItem(DISMISSED_ACCESS_FAILURE_KEY) || 0)
+    return Number.isFinite(value) && value > 0 ? value : 0
+  } catch {
+    return 0
+  }
+}
+
+function dismissAccessFailure(): void {
+  const occurredAt = Number(accessFailure.value?.occurredAt || 0)
+  if (occurredAt > dismissedAccessFailureAt.value) {
+    dismissedAccessFailureAt.value = occurredAt
+    try {
+      localStorage.setItem(DISMISSED_ACCESS_FAILURE_KEY, String(occurredAt))
+    } catch {
+      // The in-memory dismissal still prevents the polling loop from reopening it.
+    }
+  }
+  accessFailure.value = null
+}
+
 function authorizationErrorMessage(error: any): string {
   const code = String(error?.message || '')
   if (code === 'preconnection_refresh_rate_limited') return t('connections.app.refreshTooSoon')
@@ -186,8 +252,8 @@ function authorizationErrorMessage(error: any): string {
 }
 
 async function generateAuthorization(type: 'lan' | 'cloud', refresh = false) {
-  if (authorizationLoading.value) return
-  authorizationLoading.value = true
+  if (authorizationLoading.value[type]) return
+  authorizationLoading.value = { ...authorizationLoading.value, [type]: true }
   try {
     const response = type === 'lan'
       ? await createLanAppAuthorization()
@@ -205,7 +271,37 @@ async function generateAuthorization(type: 'lan' | 'cloud', refresh = false) {
   } catch (error: any) {
     message.error(authorizationErrorMessage(error))
   } finally {
-    authorizationLoading.value = false
+    authorizationLoading.value = { ...authorizationLoading.value, [type]: false }
+  }
+}
+
+function ensureCurrentAuthorization(type: 'lan' | 'cloud', verifyRelaySession = false): void {
+  const authorization = type === 'lan' ? lanAuthorization.value : cloudAuthorization.value
+  const now = Math.floor(Date.now() / 1000)
+  currentTimestamp.value = now
+  if (type === 'cloud' && verifyRelaySession) {
+    cloudAuthorization.value = null
+    qrCodeDataUrls.value = { ...qrCodeDataUrls.value, cloud: '' }
+    void generateAuthorization('cloud')
+    return
+  }
+  if (!authorization || authorization.expires_at <= now) {
+    void generateAuthorization(type)
+  }
+}
+
+async function generateDownloadQrCode() {
+  const requestedUrl = androidDownloadUrl.value
+  try {
+    const dataUrl = await QRCode.toDataURL(requestedUrl, {
+      width: 240,
+      margin: 2,
+      errorCorrectionLevel: 'M',
+      color: { dark: '#111111', light: '#ffffff' },
+    })
+    if (requestedUrl === androidDownloadUrl.value) downloadQrCodeDataUrl.value = dataUrl
+  } catch {
+    if (requestedUrl === androidDownloadUrl.value) downloadQrCodeDataUrl.value = ''
   }
 }
 
@@ -224,27 +320,25 @@ async function deleteConnection(connection: AppConnection) {
 }
 
 function openScanModal() {
-  currentTimestamp.value = Math.floor(Date.now() / 1000)
   connectionTab.value = 'lan'
   scanConnectionVersions = new Map(
     connections.value.map(connection => [connectionIdentity(connection), connection.updated_at]),
   )
   showScanModal.value = true
-  if (!lanAuthorization.value) {
-    void generateAuthorization('lan')
-  }
+  ensureCurrentAuthorization('lan')
 }
 
 watch(connectionTab, (type) => {
-  currentTimestamp.value = Math.floor(Date.now() / 1000)
-  const authorization = type === 'lan' ? lanAuthorization.value : cloudAuthorization.value
-  if (!authorization) {
-    void generateAuthorization(type)
-  }
+  ensureCurrentAuthorization(type, type === 'cloud')
+})
+
+watch(androidDownloadUrl, () => {
+  void generateDownloadQrCode()
 })
 
 onMounted(() => {
   void loadConnections()
+  void generateDownloadQrCode()
   countdownTimer = setInterval(() => {
     currentTimestamp.value = Math.floor(Date.now() / 1000)
   }, 1000)
@@ -267,27 +361,219 @@ onUnmounted(() => {
         <h2>{{ t('connections.tabs.app') }}</h2>
         <p>{{ t('connections.app.subtitle') }}</p>
       </div>
-      <NButton size="small" type="primary" @click="openScanModal">
-        {{ t('connections.app.scanToAdd') }}
-      </NButton>
+      <div class="panel-actions">
+        <div class="view-switch" role="tablist">
+          <button
+            type="button"
+            class="view-switch-button"
+            :class="{ 'view-switch-button--active': panelView === 'list' }"
+            :aria-selected="panelView === 'list'"
+            @click="panelView = 'list'"
+          >
+            {{ t('connections.app.viewList') }}
+          </button>
+          <button
+            type="button"
+            class="view-switch-button"
+            :class="{ 'view-switch-button--active': panelView === 'download' }"
+            :aria-selected="panelView === 'download'"
+            @click="panelView = 'download'"
+          >
+            {{ t('connections.app.viewDownload') }}
+          </button>
+        </div>
+        <NButton size="small" type="primary" @click="openScanModal">
+          {{ t('connections.app.scanToAdd') }}
+        </NButton>
+      </div>
     </header>
 
-    <div class="app-connections-table">
-      <NDataTable
-        size="small"
-        :columns="columns"
-        :data="connections"
-        :loading="loading"
-        bordered
-        :single-line="false"
-        :row-key="(row: AppConnection) => row.id"
-        :scroll-x="1370"
-        flex-height
+    <template v-if="panelView === 'list'">
+      <NAlert
+        v-if="accessFailure"
+        class="app-access-failure"
+        type="error"
+        :title="t('connections.app.accessFailureTitle')"
+        :bordered="false"
+        closable
+        @close="dismissAccessFailure"
       >
-        <template #empty>
-          <NEmpty size="small" :description="t('connections.app.empty')" />
-        </template>
-      </NDataTable>
+        <div class="app-access-failure__reason">{{ accessFailureReason }}</div>
+        <div class="app-access-failure__meta">
+          <span>{{ t('connections.app.accessFailureMode', { mode: accessFailureMode }) }}</span>
+          <span v-if="accessFailure.deviceName">
+            {{ t('connections.app.accessFailureDeviceName', { deviceName: accessFailure.deviceName }) }}
+          </span>
+          <span>{{ t('connections.app.accessFailureTime', { time: new Date(accessFailure.occurredAt).toLocaleString() }) }}</span>
+        </div>
+      </NAlert>
+
+      <div class="app-connections-table">
+        <NDataTable
+          size="small"
+          :columns="columns"
+          :data="connections"
+          :loading="loading"
+          bordered
+          :single-line="false"
+          :row-key="(row: AppConnection) => row.id"
+          :scroll-x="1370"
+          flex-height
+        >
+          <template #empty>
+            <NEmpty size="small" :description="t('connections.app.empty')" />
+          </template>
+        </NDataTable>
+      </div>
+    </template>
+
+    <div v-else class="app-downloads">
+      <div class="app-download-layout">
+        <section class="app-download-hero">
+          <div class="app-download-intro">
+            <div class="app-download-brand">
+              <div class="app-download-logo">
+                <img src="/logo.png" alt="">
+              </div>
+              <div>
+                <span>HStudio Mobile</span>
+                <h3>{{ t('connections.app.downloadTitle') }}</h3>
+              </div>
+            </div>
+            <p>{{ t('connections.app.downloadDescription') }}</p>
+            <div class="app-download-meta">
+              <span>{{ HSTUDIO_APP_VERSION }}</span>
+              <span>Android · iOS · HarmonyOS</span>
+            </div>
+          </div>
+
+          <div class="app-download-qr-panel">
+            <div class="app-download-qr">
+              <img
+                v-if="downloadQrCodeDataUrl"
+                :src="downloadQrCodeDataUrl"
+                :alt="t('connections.app.downloadScan')"
+              >
+              <NSpin v-else size="small" />
+            </div>
+            <strong>{{ t('connections.app.downloadScan') }}</strong>
+            <span>{{ t('connections.app.downloadScanHint') }}</span>
+            <div class="view-switch download-source-switch" role="tablist" aria-label="GitHub / Cloudflare">
+              <button
+                type="button"
+                role="tab"
+                class="view-switch-button"
+                :class="{ 'view-switch-button--active': downloadSource === 'github' }"
+                :aria-selected="downloadSource === 'github'"
+                @click="downloadSource = 'github'"
+              >
+                GitHub
+              </button>
+              <button
+                type="button"
+                role="tab"
+                class="view-switch-button"
+                :class="{ 'view-switch-button--active': downloadSource === 'cloudflare' }"
+                :aria-selected="downloadSource === 'cloudflare'"
+                @click="downloadSource = 'cloudflare'"
+              >
+                Cloudflare
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <div class="app-platform-grid">
+          <article class="app-platform-card app-platform-card--available">
+            <div class="app-platform-card-header">
+              <div class="app-platform-icon" aria-hidden="true">
+                <svg data-platform-icon="google-play" width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M3 20.5v-17c0-.59.34-1.11.84-1.35L13.69 12l-9.85 9.85A1.5 1.5 0 0 1 3 20.5Zm13.81-5.38L6.05 21.34l8.49-8.49 2.27 2.27Zm3.35-4.31c.37.22.59.63.59 1.19s-.22.97-.57 1.18l-2.29 1.32-2.5-2.5 2.5-2.5 2.27 1.31ZM6.05 2.66l10.76 6.22-2.27 2.27-8.49-8.49Z" />
+                </svg>
+              </div>
+              <NTag size="small" type="success" :bordered="false">{{ t('connections.app.available') }}</NTag>
+            </div>
+            <div class="app-platform-copy">
+              <h4>Android</h4>
+              <p>{{ t('connections.app.downloadRequirements') }}</p>
+            </div>
+            <div class="app-platform-download-controls">
+              <div class="view-switch download-source-switch" role="tablist" aria-label="GitHub / Cloudflare">
+                <button
+                  type="button"
+                  role="tab"
+                  class="view-switch-button"
+                  :class="{ 'view-switch-button--active': downloadSource === 'github' }"
+                  :aria-selected="downloadSource === 'github'"
+                  @click="downloadSource = 'github'"
+                >
+                  GitHub
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  class="view-switch-button"
+                  :class="{ 'view-switch-button--active': downloadSource === 'cloudflare' }"
+                  :aria-selected="downloadSource === 'cloudflare'"
+                  @click="downloadSource = 'cloudflare'"
+                >
+                  Cloudflare
+                </button>
+              </div>
+              <NButton
+                class="app-platform-action"
+                tag="a"
+                type="primary"
+                :href="androidDownloadUrl"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <template #icon>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+                    <path d="M12 3v12" />
+                    <path d="m7 10 5 5 5-5" />
+                    <path d="M5 21h14" />
+                  </svg>
+                </template>
+                {{ t('connections.app.downloadApk') }}
+              </NButton>
+            </div>
+          </article>
+
+          <article class="app-platform-card app-platform-card--pending">
+            <div class="app-platform-card-header">
+              <div class="app-platform-icon" aria-hidden="true">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M16.8 12.7c0-2.4 2-3.6 2.1-3.7a4.5 4.5 0 0 0-3.5-1.9c-1.5-.2-2.9.9-3.6.9-.7 0-1.8-.9-3-.9A4.8 4.8 0 0 0 4.7 9.6c-1.7 3-.4 7.4 1.2 9.8.8 1.2 1.8 2.5 3.1 2.4 1.2 0 1.7-.8 3.2-.8s1.9.8 3.2.8c1.3 0 2.2-1.2 3-2.4a10.7 10.7 0 0 0 1.4-2.9 4.2 4.2 0 0 1-3-3.8ZM14.4 5.5A4.2 4.2 0 0 0 15.5 2a4.3 4.3 0 0 0-3 1.7 4 4 0 0 0-1.1 3.4 3.6 3.6 0 0 0 3-1.6Z" />
+                </svg>
+              </div>
+              <NTag size="small" :bordered="false">{{ t('connections.app.comingSoon') }}</NTag>
+            </div>
+            <div class="app-platform-copy">
+              <h4>iOS</h4>
+              <p>{{ t('connections.app.iosPending') }}</p>
+            </div>
+            <NButton class="app-platform-action" disabled>{{ t('connections.app.comingSoon') }}</NButton>
+          </article>
+
+          <article class="app-platform-card app-platform-card--pending">
+            <div class="app-platform-card-header">
+              <div class="app-platform-icon" aria-hidden="true">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.55">
+                  <circle cx="12" cy="12" r="8.5" />
+                  <path d="M7.5 14.5c1.4-3.8 7.6-3.8 9 0M9.2 9.5h.01M14.8 9.5h.01" />
+                </svg>
+              </div>
+              <NTag size="small" :bordered="false">{{ t('connections.app.comingSoon') }}</NTag>
+            </div>
+            <div class="app-platform-copy">
+              <h4>HarmonyOS</h4>
+              <p>{{ t('connections.app.harmonyPending') }}</p>
+            </div>
+            <NButton class="app-platform-action" disabled>{{ t('connections.app.comingSoon') }}</NButton>
+          </article>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -301,7 +587,7 @@ onUnmounted(() => {
     <NTabs v-model:value="connectionTab" type="line" animated>
       <NTabPane name="lan" :tab="t('connections.app.lanConnection')">
         <div class="connection-pane">
-          <NSpin v-if="authorizationLoading && !lanAuthorization" size="small" />
+          <NSpin v-if="authorizationLoading.lan && !lanAuthorization" size="small" />
 
           <template v-else-if="lanAuthorization">
             <div class="connection-qr" :class="{ 'connection-qr--expired': authorizationExpired }">
@@ -321,7 +607,7 @@ onUnmounted(() => {
                 class="refresh-qr-button"
                 size="small"
                 quaternary
-                :loading="authorizationLoading"
+                :loading="authorizationLoading.lan"
                 @click="generateAuthorization('lan')"
               >
                 <template #icon>
@@ -341,7 +627,7 @@ onUnmounted(() => {
 
       <NTabPane name="cloud" :tab="t('connections.app.cloudConnection')">
         <div class="connection-pane">
-          <NSpin v-if="authorizationLoading && !cloudAuthorization" size="small" />
+          <NSpin v-if="authorizationLoading.cloud && !cloudAuthorization" size="small" />
 
           <template v-else-if="cloudAuthorization">
             <div class="connection-qr" :class="{ 'connection-qr--expired': authorizationExpired }">
@@ -361,7 +647,7 @@ onUnmounted(() => {
                 class="refresh-qr-button"
                 size="small"
                 quaternary
-                :loading="authorizationLoading"
+                :loading="authorizationLoading.cloud"
                 @click="generateAuthorization('cloud', true)"
               >
                 <template #icon>
@@ -422,6 +708,49 @@ onUnmounted(() => {
   }
 }
 
+.panel-actions {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 10px;
+}
+
+.view-switch {
+  display: flex;
+  padding: 3px;
+  flex: 0 0 auto;
+  gap: 2px;
+  background: $bg-secondary;
+  border: 1px solid $border-light;
+  border-radius: 10px;
+}
+
+.view-switch-button {
+  min-width: 56px;
+  height: 26px;
+  padding: 0 11px;
+  color: $text-muted;
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  line-height: 26px;
+  transition: color $transition-fast, background-color $transition-fast, box-shadow $transition-fast;
+
+  &:hover {
+    color: $text-primary;
+  }
+
+  &--active {
+    color: $text-primary;
+    background: $bg-card;
+    box-shadow: 0 1px 4px rgba(var(--text-primary-rgb), 0.1);
+    font-weight: 600;
+  }
+}
+
 .app-connections-table {
   flex: 1 1 auto;
   height: 0;
@@ -441,6 +770,299 @@ onUnmounted(() => {
   :deep(.n-data-table-base-table),
   :deep(.n-data-table-base-table-body) {
     height: 100%;
+  }
+}
+
+.app-downloads {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 20px;
+  overflow: auto;
+  background: linear-gradient(180deg, rgba(var(--accent-primary-rgb), 0.025), transparent 52%);
+}
+
+.app-download-layout {
+  width: 100%;
+  max-width: 980px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.app-download-hero {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  min-height: 230px;
+  padding: 28px 30px;
+  overflow: hidden;
+  border: 1px solid $border-color;
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at 82% 12%, rgba(var(--accent-primary-rgb), 0.09), transparent 32%),
+    linear-gradient(135deg, rgba(var(--bg-card-rgb), 0.98), rgba(var(--bg-primary-rgb), 0.92));
+
+  &::after {
+    position: absolute;
+    z-index: -1;
+    right: -72px;
+    bottom: -118px;
+    width: 280px;
+    height: 280px;
+    border: 1px solid rgba(var(--accent-primary-rgb), 0.08);
+    border-radius: 50%;
+    box-shadow:
+      0 0 0 34px rgba(var(--accent-primary-rgb), 0.025),
+      0 0 0 72px rgba(var(--accent-primary-rgb), 0.018);
+    content: '';
+  }
+}
+
+.app-download-intro {
+  position: relative;
+  z-index: 1;
+  max-width: 600px;
+
+  > p {
+    max-width: 560px;
+    margin: 18px 0 0;
+    color: $text-secondary;
+    font-size: 14px;
+    line-height: 22px;
+  }
+}
+
+.app-download-brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+
+  span {
+    display: block;
+    margin-bottom: 2px;
+    color: $text-muted;
+    font-size: 10px;
+    font-weight: 650;
+    letter-spacing: 0.09em;
+    line-height: 16px;
+    text-transform: uppercase;
+  }
+
+  h3 {
+    margin: 0;
+    color: $text-primary;
+    font-size: clamp(21px, 2.5vw, 28px);
+    font-weight: 650;
+    letter-spacing: -0.03em;
+    line-height: 1.2;
+  }
+}
+
+.app-download-logo {
+  width: 54px;
+  height: 54px;
+  padding: 6px;
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  overflow: hidden;
+  background: $bg-card;
+  border: 1px solid $border-light;
+  border-radius: 15px;
+  box-shadow: 0 8px 24px rgba(var(--text-primary-rgb), 0.08);
+
+  img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+}
+
+.app-download-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 18px;
+  gap: 7px;
+
+  span {
+    padding: 5px 9px;
+    color: $text-secondary;
+    background: $bg-secondary;
+    border: 1px solid $border-light;
+    border-radius: 999px;
+    font-size: 10px;
+    line-height: 14px;
+  }
+}
+
+.app-download-qr-panel {
+  position: relative;
+  z-index: 1;
+  width: 168px;
+  padding: 13px;
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  flex-direction: column;
+  background: rgba(var(--bg-card-rgb), 0.9);
+  border: 1px solid $border-light;
+  border-radius: 14px;
+  box-shadow: 0 14px 38px rgba(var(--text-primary-rgb), 0.09);
+  text-align: center;
+
+  strong {
+    margin-top: 9px;
+    color: $text-primary;
+    font-size: 12px;
+    font-weight: 650;
+    line-height: 18px;
+  }
+
+  > span {
+    color: $text-muted;
+    font-size: 10px;
+    line-height: 15px;
+  }
+}
+
+.app-download-qr {
+  width: 140px;
+  height: 140px;
+  padding: 6px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #ffffff;
+  border-radius: 9px;
+
+  img {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+}
+
+.download-source-switch {
+  width: 100%;
+  margin-top: 10px;
+  box-sizing: border-box;
+
+  .view-switch-button {
+    min-width: 0;
+    padding: 0 4px;
+    flex: 1 1 0;
+    font-size: 10px;
+  }
+}
+
+.app-platform-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.app-platform-card {
+  min-height: 188px;
+  padding: 18px;
+  display: flex;
+  box-sizing: border-box;
+  flex-direction: column;
+  background: $bg-card;
+  border: 1px solid $border-color;
+  border-radius: 14px;
+  transition: border-color $transition-fast, box-shadow $transition-fast, transform $transition-fast;
+
+  &--available:hover {
+    border-color: rgba(var(--accent-primary-rgb), 0.25);
+    box-shadow: 0 10px 28px rgba(var(--text-primary-rgb), 0.065);
+    transform: translateY(-1px);
+  }
+
+  &--pending {
+    background: rgba(var(--bg-card-rgb), 0.64);
+  }
+}
+
+.app-platform-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.app-platform-icon {
+  width: 42px;
+  height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: $text-primary;
+  background: $bg-secondary;
+  border-radius: 12px;
+}
+
+.app-platform-copy {
+  margin: 14px 0 16px;
+
+  h4 {
+    margin: 0;
+    color: $text-primary;
+    font-size: 16px;
+    font-weight: 650;
+    line-height: 22px;
+  }
+
+  p {
+    margin: 4px 0 0;
+    color: $text-muted;
+    font-size: 11px;
+    line-height: 17px;
+  }
+}
+
+.app-platform-action {
+  width: 100%;
+  margin-top: auto;
+}
+
+.app-platform-download-controls {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+
+  .download-source-switch {
+    margin-top: 0;
+  }
+
+  .app-platform-action {
+    margin-top: 0;
+  }
+}
+
+.app-access-failure {
+  flex: 0 0 auto;
+  margin: 12px 20px 0;
+
+  &__reason {
+    color: $text-primary;
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  &__meta {
+    margin-top: 4px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 12px;
+    color: $text-muted;
+    font-size: 12px;
   }
 }
 
@@ -515,8 +1137,39 @@ onUnmounted(() => {
     padding: 12px;
   }
 
+  .panel-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
   .app-connections-table {
     padding: 12px;
+  }
+
+  .app-downloads {
+    padding: 12px;
+  }
+
+  .app-download-hero {
+    grid-template-columns: 1fr;
+    padding: 20px;
+    gap: 22px;
+  }
+
+  .app-download-qr-panel {
+    width: 100%;
+  }
+
+  .app-platform-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .app-platform-card {
+    min-height: 174px;
+  }
+
+  .app-access-failure {
+    margin: 12px 12px 0;
   }
 
   .connection-qr {

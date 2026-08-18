@@ -3,7 +3,7 @@
   "info": {
     "title": "DechnicAuditor API",
     "description": "DechnicAuditor API — chat sessions, scheduled jobs, platform channels, model management, skills, memory, logs, file browser, group chat, and terminal.",
-    "version": "0.6.42"
+    "version": "0.6.43"
   },
   "servers": [
     {
@@ -299,6 +299,32 @@
             }
           }
         ]
+      }
+    },
+    "/api/app/profiles": {
+      "get": {
+        "tags": [
+          "Profiles"
+        ],
+        "summary": "Get profiles",
+        "description": "GET /api/app/profiles",
+        "operationId": "listForApp",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
       }
     },
     "/api/auth/app-login": {
@@ -5714,7 +5740,25 @@
           "404": {
             "description": "Not found"
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
       }
     },
     "/api/hermes/group-chat/rooms/join/{code}": {
@@ -5784,6 +5828,25 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "history",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "enum": [
+                "1"
+              ]
             }
           },
           {

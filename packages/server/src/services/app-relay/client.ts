@@ -2,7 +2,9 @@ import { randomUUID } from 'crypto'
 import { io, type Socket } from 'socket.io-client'
 import { config } from '../../config'
 import {
+  assignLegacyCloudAppConnectionUser,
   listAppConnections,
+  listPendingCloudAppConnectionRevocations,
   markCloudAppConnectionRevocationSynced,
 } from '../../db/hermes/app-connections-store'
 import { logger } from '../logger'
@@ -25,7 +27,7 @@ const ALLOWED_REQUEST_HEADERS = new Set([
   'x-hermes-profile',
   'x-request-id',
 ])
-const ALLOWED_SOCKET_NAMESPACES = new Set(['/chat-run', '/group-chat'])
+const ALLOWED_SOCKET_NAMESPACES = new Set(['/chat-run', '/group-chat', '/workflow'])
 const ALLOWED_CHAT_RUN_CLIENT_EVENTS = new Set([
   'run',
   'resume',
@@ -48,6 +50,11 @@ const ALLOWED_GROUP_CHAT_CLIENT_EVENTS = new Set([
   'approval.respond',
   'clarify.respond',
 ])
+const ALLOWED_WORKFLOW_CLIENT_EVENTS = new Set([
+  'workflows.list',
+  'workflow.status.subscribe',
+  'workflow.status.unsubscribe',
+])
 const TEXTUAL_RESPONSE_TYPES = [
   'application/json',
   'application/problem+json',
@@ -64,6 +71,15 @@ const NON_STREAMING_SUPPRESSED_EVENTS = new Set([
   'thinking.delta',
   'reasoning.available',
 ])
+
+function normalizeCloudUserId(value: unknown): number {
+  const userId = Number(value)
+  return Number.isSafeInteger(userId) && userId > 0 ? userId : 0
+}
+
+function cloudConnectionKey(deviceCode: string, cloudUserId: number): string {
+  return `${deviceCode}\u0000${cloudUserId}`
+}
 
 export interface AppRelayHttpRequest {
   id?: string
@@ -205,6 +221,10 @@ export class AppRelayClient {
     })
 
     this.socket.on('connect', () => {
+      // Every Socket.IO connection represents a new relay-side host session.
+      // Preconnections are held in relay process memory, so anything cached by
+      // Studio before a disconnect cannot be reused safely after reconnecting.
+      this.clearRelaySessionState()
       this.preconnectionExpired = false
       logger.info({ relayUrl: this.redactedRelayUrl(), machineId: this.options.machineId }, '[app-relay] connected')
     })
@@ -213,6 +233,7 @@ export class AppRelayClient {
     })
     this.socket.on('disconnect', (reason: string) => {
       this.closeLocalBridges()
+      this.clearRelaySessionState()
       logger.info({ reason, relayUrl: this.redactedRelayUrl() }, '[app-relay] disconnected')
     })
     this.socket.on('relay.replaced', () => this.stop())
@@ -235,7 +256,12 @@ export class AppRelayClient {
     })
     this.socket.on('connection.status', (payload: Record<string, unknown> = {}) => {
       const deviceCode = String(payload.deviceCode || payload.device_code || '').trim()
-      if (deviceCode) this.cloudConnectionOnline.set(deviceCode, Boolean(payload.online))
+      const cloudUserId = normalizeCloudUserId(
+        payload.appUserId || payload.app_user_id || payload.userId || payload.user_id,
+      )
+      if (deviceCode && cloudUserId) {
+        this.cloudConnectionOnline.set(cloudConnectionKey(deviceCode, cloudUserId), Boolean(payload.online))
+      }
     })
     this.socket.on('relay.preconnect.expired', () => {
       this.pendingPreconnections.clear()
@@ -259,6 +285,7 @@ export class AppRelayClient {
 
   stop(): void {
     this.closeLocalBridges()
+    this.clearRelaySessionState()
     this.socket?.disconnect()
     this.socket = null
   }
@@ -343,7 +370,10 @@ export class AppRelayClient {
     now = Math.floor(Date.now() / 1000),
   ): CloudAppPreconnection | null {
     for (const [preconnectId, pending] of this.pendingPreconnections.entries()) {
-      if (pending.preconnection.hardExpiresAt <= now) {
+      if (
+        pending.preconnection.expiresAt <= now
+        || pending.preconnection.hardExpiresAt <= now
+      ) {
         this.pendingPreconnections.delete(preconnectId)
         continue
       }
@@ -353,13 +383,14 @@ export class AppRelayClient {
     return null
   }
 
-  revokeCloudConnection(deviceCode: string, timeoutMs = 8000): Promise<boolean> {
+  revokeCloudConnection(deviceCode: string, appUserId: number, timeoutMs = 8000): Promise<boolean> {
     const socket = this.socket
-    if (!socket?.connected) return Promise.resolve(false)
+    const cloudUserId = normalizeCloudUserId(appUserId)
+    if (!socket?.connected || !cloudUserId) return Promise.resolve(false)
     return new Promise(resolve => {
       socket.timeout(timeoutMs).emit(
         'connection.revoke',
-        { deviceCode },
+        { deviceCode, appUserId: cloudUserId },
         (error: Error | null, response: Record<string, unknown> = {}) => {
           resolve(!error && response.ok === true)
         },
@@ -367,8 +398,12 @@ export class AppRelayClient {
     })
   }
 
-  isCloudDeviceOnline(deviceCode: string): boolean {
-    return this.cloudConnectionOnline.get(deviceCode) || false
+  isCloudDeviceOnline(deviceCode: string, appUserId: number): boolean {
+    const cloudUserId = normalizeCloudUserId(appUserId)
+    if (cloudUserId) return this.cloudConnectionOnline.get(cloudConnectionKey(deviceCode, cloudUserId)) || false
+    const prefix = `${deviceCode}\u0000`
+    return [...this.cloudConnectionOnline.entries()]
+      .some(([key, online]) => key.startsWith(prefix) && online)
   }
 
   waitForConnected(timeoutMs = 5000): Promise<boolean> {
@@ -379,22 +414,16 @@ export class AppRelayClient {
       const cleanup = () => {
         clearTimeout(timer)
         socket.off('connect', onConnect)
-        socket.off('connect_error', onFailure)
       }
       const onConnect = () => {
         cleanup()
         resolve(true)
-      }
-      const onFailure = () => {
-        cleanup()
-        resolve(false)
       }
       const timer = setTimeout(() => {
         cleanup()
         resolve(false)
       }, timeoutMs)
       socket.once('connect', onConnect)
-      socket.once('connect_error', onFailure)
     })
   }
 
@@ -555,15 +584,26 @@ export class AppRelayClient {
     }
   }
 
+  private clearRelaySessionState(): void {
+    this.pendingPreconnections.clear()
+    this.cloudConnectionOnline.clear()
+    this.pairingCode = ''
+    this.pairingExpiresAt = 0
+  }
+
   private async authorizeCloudConnection(request: Record<string, unknown>): Promise<Record<string, unknown>> {
     const preconnectId = String(request.preconnectId || request.preconnect_id || '').trim()
     const matchingCode = String(request.matchingCode || request.matching_code || '').trim()
     const pending = this.pendingPreconnections.get(preconnectId)
+    const cloudUserId = normalizeCloudUserId(
+      request.appUserId || request.app_user_id || request.userId || request.user_id,
+    )
     if (
       !pending
       || pending.preconnection.expiresAt <= Math.floor(Date.now() / 1000)
       || pending.preconnection.matchingCode !== matchingCode
     ) return { ok: false, error: 'studio_preconnection_not_found' }
+    if (!cloudUserId) return { ok: false, error: 'app_user_id_required' }
 
     const response = await this.handleHttpRequest({
       id: `cloud-login-${preconnectId}`,
@@ -576,6 +616,7 @@ export class AppRelayClient {
         device_name: request.deviceName || request.device_name,
         device_brand: request.deviceBrand || request.device_brand,
         device_model: request.deviceModel || request.device_model,
+        cloud_user_id: cloudUserId,
       },
     })
     if (Number(response.status) < 200 || Number(response.status) >= 300 || typeof response.body !== 'string') {
@@ -612,25 +653,69 @@ export class AppRelayClient {
       if (!item || typeof item !== 'object' || Array.isArray(item)) continue
       const connection = item as Record<string, unknown>
       const deviceCode = String(connection.deviceCode || connection.device_code || '').trim()
-      if (deviceCode) this.cloudConnectionOnline.set(deviceCode, Boolean(connection.online))
+      const cloudUserId = normalizeCloudUserId(
+        connection.appUserId || connection.app_user_id || connection.userId || connection.user_id,
+      )
+      if (deviceCode && cloudUserId) {
+        this.cloudConnectionOnline.set(cloudConnectionKey(deviceCode, cloudUserId), Boolean(connection.online))
+      }
     }
   }
 
   private async reconcileConnectionSnapshot(payload: Record<string, unknown>): Promise<void> {
-    const localDeviceCodes = new Set(
-      listAppConnections()
-        .filter(connection => connection.connection_type === 'cloud')
-        .map(connection => connection.device_code),
-    )
     const connections = Array.isArray(payload.connections) ? payload.connections : []
+    const remoteAccountsByDevice = new Map<string, Set<number>>()
     for (const item of connections) {
       if (!item || typeof item !== 'object' || Array.isArray(item)) continue
       const connection = item as Record<string, unknown>
       const deviceCode = String(connection.deviceCode || connection.device_code || '').trim()
-      if (!deviceCode || localDeviceCodes.has(deviceCode)) continue
-      if (await this.revokeCloudConnection(deviceCode)) {
-        markCloudAppConnectionRevocationSynced(deviceCode)
-        this.cloudConnectionOnline.delete(deviceCode)
+      const cloudUserId = normalizeCloudUserId(
+        connection.appUserId || connection.app_user_id || connection.userId || connection.user_id,
+      )
+      if (!deviceCode || !cloudUserId) continue
+      const accounts = remoteAccountsByDevice.get(deviceCode) || new Set<number>()
+      accounts.add(cloudUserId)
+      remoteAccountsByDevice.set(deviceCode, accounts)
+    }
+    for (const [deviceCode, accountIds] of remoteAccountsByDevice) {
+      if (accountIds.size === 1) {
+        assignLegacyCloudAppConnectionUser(deviceCode, [...accountIds][0])
+      }
+    }
+
+    const localConnections = listAppConnections()
+      .filter(connection => connection.connection_type === 'cloud')
+    const localConnectionKeys = new Set(
+      localConnections
+        .filter(connection => connection.cloud_user_id > 0)
+        .map(connection => cloudConnectionKey(connection.device_code, connection.cloud_user_id)),
+    )
+    const legacyDeviceCodes = new Set(
+      localConnections
+        .filter(connection => connection.cloud_user_id === 0)
+        .map(connection => connection.device_code),
+    )
+    const pendingRevocationKeys = new Set(
+      listPendingCloudAppConnectionRevocations()
+        .map(connection => cloudConnectionKey(connection.device_code, connection.cloud_user_id)),
+    )
+    for (const item of connections) {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) continue
+      const connection = item as Record<string, unknown>
+      const deviceCode = String(connection.deviceCode || connection.device_code || '').trim()
+      const cloudUserId = normalizeCloudUserId(
+        connection.appUserId || connection.app_user_id || connection.userId || connection.user_id,
+      )
+      if (
+        !deviceCode
+        || !cloudUserId
+        || localConnectionKeys.has(cloudConnectionKey(deviceCode, cloudUserId))
+        || legacyDeviceCodes.has(deviceCode)
+        || !pendingRevocationKeys.has(cloudConnectionKey(deviceCode, cloudUserId))
+      ) continue
+      if (await this.revokeCloudConnection(deviceCode, cloudUserId)) {
+        markCloudAppConnectionRevocationSynced(deviceCode, cloudUserId)
+        this.cloudConnectionOnline.delete(cloudConnectionKey(deviceCode, cloudUserId))
       }
     }
   }
@@ -841,6 +926,7 @@ function normalizeTimeout(value: unknown): number {
 function isAllowedSocketEvent(namespace: string, event: string): boolean {
   if (namespace === '/chat-run') return ALLOWED_CHAT_RUN_CLIENT_EVENTS.has(event)
   if (namespace === '/group-chat') return ALLOWED_GROUP_CHAT_CLIENT_EVENTS.has(event)
+  if (namespace === '/workflow') return ALLOWED_WORKFLOW_CLIENT_EVENTS.has(event)
   return false
 }
 
