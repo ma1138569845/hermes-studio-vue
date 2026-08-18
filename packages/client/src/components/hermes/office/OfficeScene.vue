@@ -10,7 +10,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  (event: 'agentClick', name: string): void
+  (event: 'agentClick', payload: { name: string; clientX: number; clientY: number }): void
   (event: 'failed'): void
   (event: 'ready'): void
 }>()
@@ -19,7 +19,11 @@ function enqueueAction(action: OfficeAction): boolean {
   return engine?.enqueueAction(action) ?? false
 }
 
-defineExpose({ enqueueAction })
+function playEmote(name: string, animation: string): boolean {
+  return engine?.playEmote(name, animation) ?? false
+}
+
+defineExpose({ enqueueAction, playEmote })
 
 const mountEl = ref<HTMLElement | null>(null)
 let engine: OfficeSceneImpl | null = null
@@ -36,7 +40,7 @@ async function startScene(): Promise<void> {
   if (!mount || engine) return
   try {
     engine = new OfficeSceneImpl(props.strings)
-    const ok = await engine.init(mount, (name) => emit('agentClick', name))
+    const ok = await engine.init(mount, (payload) => emit('agentClick', payload))
     if (!ok) throw new Error('Scene init returned false')
     engine.sync(props.profiles)
     engine.resume()

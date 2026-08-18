@@ -13,6 +13,7 @@ export interface KanbanTask {
   priority: number
   created_by: string | null
   created_at: number
+  updated_at?: number
   started_at: number | null
   completed_at: number | null
   workspace_kind: string

@@ -14,7 +14,6 @@ export default {
     title: 'Bureau',
     refresh: 'Actualiser',
     filter: { all: 'Tous', open: 'En cours', done: 'Terminés' },
-    decor: { kitchen: 'Salle de repos', lounge: 'Salon' },
     status: { busy: 'Occupé', online: 'En ligne', offline: 'Hors ligne' },
     newTaskPrefix: 'Nouvelle tâche',
     ambient1: 'Point rapide sur l\'état de cette tâche.',
@@ -37,6 +36,10 @@ export default {
       chatHint: 'Ouvrir une conversation avec « {name} » ? Cela changera l\'agent actif et entrera dans le chat.',
       openChat: 'Ouvrir le chat',
     },
+    stats: { online: 'Online', busy: 'Busy', openTasks: 'Open Tasks', doneToday: 'Done Today' },
+    rightPanel: { taskFlow: 'Task Flow', activity: 'Activity', activityEmpty: 'No recent activity', quickTools: 'Quick Tools', files: 'Files', browser: 'Browser' },
+    toolbar: { pauseAll: 'Pause All', resumeAll: 'Resume All', newTask: 'New Task', exportReport: 'Export Report', paused: 'All agents paused', resumed: 'All agents resumed' },
+    action: { interact: 'Interact', interactWith: 'Interact with {name}', noOnlineTargets: 'No other online agents', state: 'State', working: 'Working', workingTask: 'Working on task…', thinking: 'Thinking', thinkingTask: 'Thinking…', online: 'Online', offline: 'Offline', viewProfile: 'View Profile', interactHint: 'Send this agent to visit another online agent', stateHint: 'Change this agent\'s current state' },
   },
 
   kanban: {

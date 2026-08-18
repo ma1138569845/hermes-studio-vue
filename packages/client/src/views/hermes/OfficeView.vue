@@ -5,14 +5,18 @@ import { useI18n } from 'vue-i18n'
 import { useOfficeStore } from '@/stores/hermes/office'
 import OfficeScene from '@/components/hermes/office/OfficeScene.vue'
 import OfficeDeskGrid from '@/components/hermes/office/OfficeDeskGrid.vue'
-import OfficeLedger from '@/components/hermes/office/OfficeLedger.vue'
 import OfficeAgentModal from '@/components/hermes/office/OfficeAgentModal.vue'
+import OfficeHeaderStats from '@/components/hermes/office/OfficeHeaderStats.vue'
+import OfficeRightPanel from '@/components/hermes/office/OfficeRightPanel.vue'
+import OfficeBottomToolbar from '@/components/hermes/office/OfficeBottomToolbar.vue'
+import OfficeAgentActionMenu from '@/components/hermes/office/OfficeAgentActionMenu.vue'
 import type { OfficeSceneStrings } from '@/components/hermes/office/office-scene/engine'
 
 const { t } = useI18n()
 const officeStore = useOfficeStore()
 const sceneRef = ref<InstanceType<typeof OfficeScene> | null>(null)
 const sceneFailed = ref(false)
+const actionMenu = ref<{ name: string; x: number; y: number } | null>(null)
 
 const ambientKeys = ['office.ambient1', 'office.ambient2', 'office.ambient3', 'office.ambient4']
 
@@ -22,7 +26,6 @@ const strings = computed<OfficeSceneStrings>(() => ({
     const key = ambientKeys[Math.floor(Math.random() * ambientKeys.length)]
     return t(key)
   },
-  decorLabel: (kind) => t(kind === 'kitchen' ? 'office.decor.kitchen' : 'office.decor.lounge'),
 }))
 
 function handleSceneReady(): void {
@@ -35,8 +38,31 @@ function handleSceneFailed(): void {
   officeStore.detachScene()
 }
 
-function handleAgentClick(name: string): void {
+function handleAgentClick(payload: { name: string; clientX: number; clientY: number }): void {
+  actionMenu.value = { name: payload.name, x: payload.clientX, y: payload.clientY }
+}
+
+function openProfile(name: string): void {
   officeStore.openAgent(name)
+  actionMenu.value = null
+}
+
+async function handleSetState(state: 'working' | 'online' | 'offline' | 'thinking', task?: string): Promise<void> {
+  const name = actionMenu.value?.name
+  if (name) await officeStore.dispatchSetState(name, state, task)
+}
+
+async function handleInteract(targetName: string): Promise<void> {
+  const visitor = actionMenu.value?.name
+  if (visitor) await officeStore.dispatchDeskVisit(visitor, targetName, t('office.visitFallback'))
+}
+
+function handleNewTask(): void {
+  // Future: navigate to kanban task creation or open a task modal.
+}
+
+function handleExportReport(): void {
+  // Future: trigger report export.
 }
 
 onMounted(() => {
@@ -56,8 +82,11 @@ onUnmounted(() => {
         <NButton size="small" secondary @click="officeStore.load()">{{ t('office.refresh') }}</NButton>
       </div>
     </header>
-    <div class="office-body">
-      <div class="office-stage">
+
+    <OfficeHeaderStats />
+
+    <div class="office-dashboard">
+      <main class="office-stage">
         <OfficeScene
           v-if="!sceneFailed"
           ref="sceneRef"
@@ -72,12 +101,29 @@ onUnmounted(() => {
           :profiles="officeStore.officeProfiles"
           @agent-click="handleAgentClick"
         />
-      </div>
-      <aside class="office-side">
-        <OfficeLedger />
-      </aside>
+        <OfficeBottomToolbar @new-task="handleNewTask" @export-report="handleExportReport" />
+      </main>
+      <OfficeRightPanel />
     </div>
+
     <OfficeAgentModal />
+
+    <Teleport v-if="actionMenu" to="body">
+      <div
+        class="office-action-backdrop"
+        aria-hidden="true"
+        @click="actionMenu = null"
+      />
+      <OfficeAgentActionMenu
+        :agent-name="actionMenu.name"
+        :x="actionMenu.x"
+        :y="actionMenu.y"
+        @close="actionMenu = null"
+        @open-profile="openProfile"
+        @set-state="handleSetState"
+        @interact="handleInteract"
+      />
+    </Teleport>
   </div>
 </template>
 
@@ -89,45 +135,36 @@ onUnmounted(() => {
   flex-direction: column;
   height: 100%;
   min-height: 0;
+  gap: 12px;
+  padding: 12px 16px 16px;
 }
 
-.office-body {
+.office-dashboard {
   flex: 1;
   min-height: 0;
   display: flex;
   gap: 12px;
-  padding: 0 16px 16px;
 }
 
 .office-stage {
   flex: 1;
   min-width: 0;
+  position: relative;
+  overflow: hidden;
   border: 1px solid var(--border-color);
   border-radius: $radius-md;
-  overflow: hidden;
   background: var(--bg-secondary);
 }
 
-.office-side {
-  width: 300px;
-  flex: 0 0 300px;
-  min-height: 0;
-  border: 1px solid var(--border-color);
-  border-radius: $radius-md;
-  padding: 12px;
-  background: var(--bg-card);
-  overflow: hidden;
+.office-action-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 999;
 }
 
 @media (max-width: $breakpoint-mobile) {
-  .office-body {
+  .office-dashboard {
     flex-direction: column;
-  }
-
-  .office-side {
-    width: 100%;
-    flex: none;
-    height: 260px;
   }
 }
 </style>

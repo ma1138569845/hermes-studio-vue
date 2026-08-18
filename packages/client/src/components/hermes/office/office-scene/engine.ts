@@ -3,12 +3,13 @@
  * 架构移植自 dechnic-auditor-agent-main（源自 ai-office-react-main src/scene/OfficeScene.ts：
  * ticker 循环、fit-stage 缩放、深度排序、ambient 自动拜访），适配 TypeScript + 动态 roster。
  */
-import { Application, Container, Graphics, Text } from 'pixi.js'
-import { SCENE_WIDTH, SCENE_HEIGHT, DECOR, computeDesks } from './layout'
+import { Application, Container, FederatedPointerEvent, Graphics, Sprite } from 'pixi.js'
+import { SCENE_WIDTH, SCENE_HEIGHT, computeDesks } from './layout'
 import { DeskActor, AgentActor } from './characters'
 import type { AgentRecord } from './characters'
 import { MissionRunner } from './missions'
 import { resolveSceneTheme } from './theme'
+import { loadOfficeTextures, getOfficeBackgroundTexture } from './assets'
 import type { OfficeAction } from '@/api/hermes/office'
 
 const AUTO_WORKFLOW_IDLE_SEC = 8
@@ -23,7 +24,6 @@ export interface OfficeAgentProfile {
 export interface OfficeSceneStrings {
   visitFallback: (hostName: string) => string
   ambientMessage: (visitorName: string, hostName: string) => string
-  decorLabel: (kind: 'kitchen' | 'lounge') => string
 }
 
 export class OfficeSceneImpl {
@@ -32,7 +32,7 @@ export class OfficeSceneImpl {
   private readonly agents = new Map<string, AgentRecord>()
   private readonly runner: MissionRunner
   private strings: OfficeSceneStrings
-  private onAgentClick: ((name: string) => void) | null = null
+  private onAgentClick: ((payload: { name: string; clientX: number; clientY: number }) => void) | null = null
   private paused = true
   private idleTimer = 0
   private resizeObserver: ResizeObserver | null = null
@@ -49,7 +49,7 @@ export class OfficeSceneImpl {
     this.runner.reducedMotion = this.reducedMotion
   }
 
-  async init(mount: HTMLElement, onAgentClick?: (name: string) => void): Promise<boolean> {
+  async init(mount: HTMLElement, onAgentClick?: (payload: { name: string; clientX: number; clientY: number }) => void): Promise<boolean> {
     if (this.app) {
       this.onAgentClick = onAgentClick || this.onAgentClick
       return true
@@ -69,6 +69,8 @@ export class OfficeSceneImpl {
 
     this.onAgentClick = onAgentClick || null
 
+    await loadOfficeTextures()
+
     const world = new Container()
     this.world = world
     app.stage.addChild(world)
@@ -86,31 +88,26 @@ export class OfficeSceneImpl {
   private drawFloor(): void {
     const theme = resolveSceneTheme()
     const world = this.world!
-    const floor = new Graphics()
-    floor.rect(0, 0, SCENE_WIDTH, SCENE_HEIGHT).fill(theme.floor)
-    // 点阵网格，镜像 DOM 降级网格的背景。
-    for (let x = 40; x < SCENE_WIDTH; x += 88) {
-      for (let y = 40; y < SCENE_HEIGHT; y += 88) {
-        floor.circle(x, y, 2).fill({ color: theme.floorDot, alpha: 0.5 })
-      }
-    }
-    floor.zIndex = -1000
-    world.addChild(floor)
 
-    for (const d of DECOR) {
-      const icon = new Text({ text: d.icon, style: { fontSize: 44 } })
-      icon.anchor.set(0.5)
-      icon.position.set(d.x, d.y)
-      icon.zIndex = -999
-      world.addChild(icon)
-      const label = new Text({
-        text: this.strings.decorLabel(d.kind),
-        style: { fontFamily: 'system-ui, sans-serif', fontSize: 12, fill: theme.label },
-      })
-      label.anchor.set(0.5, 0)
-      label.position.set(d.x, d.y + 28)
-      label.zIndex = -999
-      world.addChild(label)
+    const bgTexture = getOfficeBackgroundTexture()
+    if (bgTexture) {
+      const bg = new Sprite(bgTexture)
+      const scale = Math.max(SCENE_WIDTH / bgTexture.width, SCENE_HEIGHT / bgTexture.height)
+      bg.scale.set(scale)
+      bg.position.set((SCENE_WIDTH - bgTexture.width * scale) / 2, (SCENE_HEIGHT - bgTexture.height * scale) / 2)
+      bg.zIndex = -1000
+      world.addChild(bg)
+    } else {
+      const floor = new Graphics()
+      floor.rect(0, 0, SCENE_WIDTH, SCENE_HEIGHT).fill(theme.floor)
+      // 点阵网格，镜像 DOM 降级网格的背景。
+      for (let x = 40; x < SCENE_WIDTH; x += 88) {
+        for (let y = 40; y < SCENE_HEIGHT; y += 88) {
+          floor.circle(x, y, 2).fill({ color: theme.floorDot, alpha: 0.5 })
+        }
+      }
+      floor.zIndex = -1000
+      world.addChild(floor)
     }
   }
 
@@ -186,7 +183,13 @@ export class OfficeSceneImpl {
 
     const actor = new AgentActor(profile.name, profile.color)
     actor.position.set(desk.seatX, desk.seatY)
-    actor.on('pointertap', () => this.onAgentClick?.(profile.name))
+    actor.on('pointertap', (event: FederatedPointerEvent) => {
+      this.onAgentClick?.({
+        name: profile.name,
+        clientX: event.clientX,
+        clientY: event.clientY,
+      })
+    })
     world.addChild(actor)
 
     const base: AgentRecord['baseState'] = profile.busy ? 'working' : profile.online ? 'online' : 'offline'
@@ -212,6 +215,13 @@ export class OfficeSceneImpl {
   enqueueAction(action: OfficeAction): boolean {
     this.idleTimer = 0
     return this.runner.enqueue(action)
+  }
+
+  playEmote(name: string, animation: string): boolean {
+    const agent = this.agents.get(name)
+    if (!agent) return false
+    agent.actor.playEmote(animation)
+    return true
   }
 
   get busy(): boolean {

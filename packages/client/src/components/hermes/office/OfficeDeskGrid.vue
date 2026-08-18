@@ -10,7 +10,7 @@ export interface OfficeGridProfile {
 }
 
 const props = defineProps<{ profiles: OfficeGridProfile[] }>()
-const emit = defineEmits<{ (event: 'agentClick', name: string): void }>()
+const emit = defineEmits<{ (event: 'agentClick', payload: { name: string; clientX: number; clientY: number }): void }>()
 const { t } = useI18n()
 
 function initial(name: string): string {
@@ -44,17 +44,13 @@ const rows = computed(() =>
 
 <template>
   <div class="office-desk-grid">
-    <div class="office-decor office-decor-kitchen" aria-hidden="true">
-      <div class="office-decor-icon">☕</div>
-      <div class="office-decor-label">{{ t('office.decor.kitchen') }}</div>
-    </div>
     <button
       v-for="{ profile, cssColor, textColor, label } in rows"
       :key="profile.name"
       type="button"
       class="office-desk"
       :class="deskClass(profile)"
-      @click="emit('agentClick', profile.name)"
+      @click="(event: MouseEvent) => emit('agentClick', { name: profile.name, clientX: event.clientX, clientY: event.clientY })"
     >
       <div class="office-desk-surface">
         <div class="office-desk-monitor" />
@@ -70,10 +66,6 @@ const rows = computed(() =>
         <span class="office-desk-status">{{ label }}</span>
       </div>
     </button>
-    <div class="office-decor office-decor-lounge" aria-hidden="true">
-      <div class="office-decor-icon">🪴</div>
-      <div class="office-decor-label">{{ t('office.decor.lounge') }}</div>
-    </div>
   </div>
 </template>
 
@@ -92,39 +84,6 @@ const rows = computed(() =>
   background: var(--bg-secondary);
 }
 
-.office-decor {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 14px;
-  border: 1px dashed var(--border-color);
-  border-radius: $radius-md;
-  color: var(--text-muted);
-  user-select: none;
-
-  &.office-decor-kitchen {
-    grid-column: 1 / -1;
-    justify-self: start;
-    min-width: 96px;
-  }
-
-  &.office-decor-lounge {
-    grid-column: 1 / -1;
-    justify-self: end;
-    min-width: 96px;
-  }
-}
-
-.office-decor-icon {
-  font-size: 28px;
-}
-
-.office-decor-label {
-  font-size: 12px;
-}
-
 .office-desk {
   display: flex;
   flex-direction: column;
@@ -135,7 +94,7 @@ const rows = computed(() =>
   background: var(--bg-card);
   color: inherit;
   font: inherit;
-  text-align: left;
+  text-align: start;
   cursor: pointer;
   transition:
     border-color $transition-fast,

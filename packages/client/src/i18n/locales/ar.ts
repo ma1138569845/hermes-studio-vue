@@ -1192,7 +1192,6 @@ export default {
     title: 'المكتب',
     refresh: 'تحديث',
     filter: { all: 'الكل', open: 'قيد التنفيذ', done: 'مكتمل' },
-    decor: { kitchen: 'غرفة الاستراحة', lounge: 'الصالة' },
     status: { busy: 'مشغول', online: 'متصل', offline: 'غير متصل' },
     newTaskPrefix: 'مهمة جديدة',
     ambient1: 'مزامنة سريعة حول حالة هذه المهمة.',
@@ -1215,6 +1214,10 @@ export default {
       chatHint: 'فتح محادثة مع «{name}»؟ سيؤدي ذلك إلى تبديل الوكيل النشط ودخول الدردشة.',
       openChat: 'فتح الدردشة',
     },
+    stats: { online: 'Online', busy: 'Busy', openTasks: 'Open Tasks', doneToday: 'Done Today' },
+    rightPanel: { taskFlow: 'Task Flow', activity: 'Activity', activityEmpty: 'No recent activity', quickTools: 'Quick Tools', files: 'Files', browser: 'Browser' },
+    toolbar: { pauseAll: 'Pause All', resumeAll: 'Resume All', newTask: 'New Task', exportReport: 'Export Report', paused: 'All agents paused', resumed: 'All agents resumed' },
+    action: { interact: 'Interact', interactWith: 'Interact with {name}', noOnlineTargets: 'No other online agents', state: 'State', working: 'Working', workingTask: 'Working on task…', thinking: 'Thinking', thinkingTask: 'Thinking…', online: 'Online', offline: 'Offline', viewProfile: 'View Profile', interactHint: 'Send this agent to visit another online agent', stateHint: 'Change this agent\'s current state' },
   },
 
   kanban: {

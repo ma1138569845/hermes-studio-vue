@@ -385,7 +385,7 @@ function openTaskInKanban(task: KanbanTask): void {
   background: var(--bg-card);
   color: inherit;
   font: inherit;
-  text-align: left;
+  text-align: start;
   cursor: pointer;
 
   &:hover,

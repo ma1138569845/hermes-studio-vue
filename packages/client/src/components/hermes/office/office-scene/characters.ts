@@ -3,11 +3,13 @@
  * 视觉语言对应 DOM 降级网格的 CSS 工位卡片（桌面/显示器/椅子 + 头部首字母角色）。
  * 参考项目的 Spine/chibi 资源刻意不用（版权 + 专有运行时）。
  */
-import { Container, Graphics, Text } from 'pixi.js'
+import { Container, Graphics, Sprite, Text } from 'pixi.js'
 import type { TextStyleOptions } from 'pixi.js'
 import { Bubble } from './bubbles'
 import { resolveSceneTheme, contrastingTextColor } from './theme'
+import { DESK_W, DESK_H } from './layout'
 import type { DeskLayout, Point } from './layout'
+import { getOfficeDeskTexture, getOfficeChairTexture } from './assets'
 
 export type DeskStatus = 'working' | 'online' | 'offline'
 export type BaseState = 'working' | 'online' | 'offline' | 'thinking'
@@ -69,6 +71,10 @@ export class DeskActor extends Container {
     super()
     this.desk = desk
 
+    const deskTexture = getOfficeDeskTexture()
+    const chairTexture = getOfficeChairTexture()
+    const hasTextures = !!(deskTexture && chairTexture)
+
     const g = new Graphics()
     // 阴影
     g.ellipse(0, 58, 78, 12).fill({ color: 0x000000, alpha: 0.12 })
@@ -80,7 +86,26 @@ export class DeskActor extends Container {
     g.rect(-3, -28, 6, 8).fill(this.theme.monitor)
     // 椅子（座位点后方）
     g.roundRect(-16, 30, 32, 18, 5).fill(this.theme.chair).stroke({ color: 0x9d9688, width: 1 })
+    g.visible = !hasTextures
     this.addChild(g)
+
+    if (deskTexture) {
+      const deskSprite = new Sprite(deskTexture)
+      deskSprite.anchor.set(0.5, 0.5)
+      const scale = Math.min(DESK_W / deskTexture.width, DESK_H / deskTexture.height)
+      deskSprite.scale.set(scale)
+      deskSprite.position.set(0, 10)
+      this.addChild(deskSprite)
+    }
+
+    if (chairTexture) {
+      const chairSprite = new Sprite(chairTexture)
+      chairSprite.anchor.set(0.5, 0.5)
+      const scale = Math.min(64 / chairTexture.width, 64 / chairTexture.height)
+      chairSprite.scale.set(scale)
+      chairSprite.position.set(0, 56)
+      this.addChild(chairSprite)
+    }
 
     this.screenGlow.roundRect(-21, -57, 42, 24, 2).fill({ color: this.theme.screenGlow, alpha: 0 })
     this.addChild(this.screenGlow)
@@ -89,7 +114,7 @@ export class DeskActor extends Container {
 
     const label = new Text({ text: name, style: { ...LABEL_STYLE, fill: this.theme.label } })
     label.anchor.set(0.5, 0)
-    label.position.set(0, 62)
+    label.position.set(0, 72)
     this.addChild(label)
 
     this.setStatus('offline')
@@ -115,42 +140,85 @@ export class DeskActor extends Container {
  */
 export class AgentActor extends Container {
   agentName: string
-  private bobPhase = Math.random() * Math.PI * 2
   state: AgentState = 'online'
   celebrating = 0
 
-  private readonly body = new Container()
-  private readonly bubble = new Bubble()
+  private readonly body: Container
+  private readonly shadow: Graphics
+  private readonly bubble: Bubble
+  private readonly head: Container
+  private readonly torso: Graphics
+  private readonly leftArm: Graphics
+  private readonly rightArm: Graphics
+  private readonly leftLeg: Graphics
+  private readonly rightLeg: Graphics
+  private readonly thinkingDots: Container
+
+  private bobPhase = Math.random() * Math.PI * 2
+  private customAnimation: string | null = null
+  private customAnimTimer = 0
 
   constructor(name: string, color: number) {
     super()
     this.agentName = name
 
-    const shadow = new Graphics()
-    shadow.ellipse(0, 4, 24, 7).fill({ color: 0x000000, alpha: 0.2 })
-    this.addChild(shadow)
+    this.shadow = new Graphics()
+    this.shadow.ellipse(0, 4, 24, 7).fill({ color: 0x000000, alpha: 0.2 })
+    this.addChild(this.shadow)
 
+    this.body = new Container()
     this.addChild(this.body)
 
-    const torso = new Graphics()
-    torso.roundRect(-18, -34, 36, 30, 12).fill(color)
-    this.body.addChild(torso)
+    this.torso = new Graphics()
+    this.torso.roundRect(-15, -50, 30, 30, 10).fill(color)
+    this.body.addChild(this.torso)
 
-    const head = new Container()
+    this.leftLeg = new Graphics()
+    this.leftLeg.roundRect(-4, 0, 8, 22, 4).fill(color)
+    this.leftLeg.position.set(-7, -24)
+    this.body.addChild(this.leftLeg)
+
+    this.rightLeg = new Graphics()
+    this.rightLeg.roundRect(-4, 0, 8, 22, 4).fill(color)
+    this.rightLeg.position.set(7, -24)
+    this.body.addChild(this.rightLeg)
+
+    this.leftArm = new Graphics()
+    this.leftArm.roundRect(-3, 0, 6, 20, 3).fill(color)
+    this.leftArm.position.set(-18, -46)
+    this.body.addChild(this.leftArm)
+
+    this.rightArm = new Graphics()
+    this.rightArm.roundRect(-3, 0, 6, 20, 3).fill(color)
+    this.rightArm.position.set(18, -46)
+    this.body.addChild(this.rightArm)
+
+    this.head = new Container()
     const skull = new Graphics()
-    skull.circle(0, 0, 17).fill(color)
-    skull.circle(-5, -6, 6).fill({ color: 0xffffff, alpha: 0.25 })
-    head.addChild(skull)
+    skull.circle(0, 0, 16).fill(color)
+    skull.circle(-5, -6, 5).fill({ color: 0xffffff, alpha: 0.25 })
+    this.head.addChild(skull)
     const initial = new Text({
       text: (name || '?').trim().charAt(0).toUpperCase() || '?',
       style: { ...INITIAL_STYLE, fill: contrastingTextColor(color) },
     })
     initial.anchor.set(0.5, 0.5)
-    head.addChild(initial)
-    head.position.set(0, -48)
-    this.body.addChild(head)
+    this.head.addChild(initial)
+    this.head.position.set(0, -62)
+    this.body.addChild(this.head)
 
-    this.bubble.position.set(0, -78)
+    this.thinkingDots = new Container()
+    for (let i = 0; i < 3; i += 1) {
+      const dot = new Graphics()
+      dot.circle(i * 8 - 8, 0, 3).fill({ color: 0xffffff, alpha: 0.85 })
+      this.thinkingDots.addChild(dot)
+    }
+    this.thinkingDots.position.set(0, -88)
+    this.thinkingDots.visible = false
+    this.body.addChild(this.thinkingDots)
+
+    this.bubble = new Bubble()
+    this.bubble.position.set(0, -104)
     this.addChild(this.bubble)
 
     this.eventMode = 'static'
@@ -159,8 +227,8 @@ export class AgentActor extends Container {
 
   setState(state: AgentState): void {
     this.state = state
-    const dim = state === 'offline'
-    this.body.alpha = dim ? 0.5 : 1
+    this.body.alpha = state === 'offline' ? 0.5 : 1
+    this.resetPose()
   }
 
   /** @param dir 1 | -1 — 行走/交谈时水平翻转 */
@@ -181,6 +249,22 @@ export class AgentActor extends Container {
     this.celebrating = 0.9
   }
 
+  playEmote(animation: string): void {
+    this.customAnimation = animation
+    this.customAnimTimer = 2
+    this.resetPose()
+  }
+
+  private resetPose(): void {
+    this.leftArm.rotation = 0
+    this.rightArm.rotation = 0
+    this.leftLeg.rotation = 0
+    this.rightLeg.rotation = 0
+    this.body.position.y = 0
+    this.body.scale.y = 1
+    this.thinkingDots.visible = false
+  }
+
   /** 每帧动画。 */
   update(dt: number, reducedMotion: boolean): void {
     this.bubble.update(dt)
@@ -192,19 +276,70 @@ export class AgentActor extends Container {
       this.body.position.y = -Math.abs(hop)
       this.body.scale.y = 1 + Math.sin(p * Math.PI * 3) * 0.12 * p
       if (this.celebrating <= 0) {
-        this.body.position.y = 0
-        this.body.scale.y = 1
+        this.resetPose()
       }
       return
     }
 
-    if (reducedMotion) {
-      this.body.position.y = 0
+    if (reducedMotion || this.state === 'offline') {
+      this.resetPose()
+      return
+    }
+
+    if (this.customAnimTimer > 0) {
+      this.customAnimTimer -= dt
+      this.applyCustomAnimation(dt)
+      if (this.customAnimTimer <= 0) {
+        this.customAnimation = null
+      }
       return
     }
 
     this.bobPhase += dt * (this.state === 'walking' ? 11 : this.state === 'working' || this.state === 'talking' ? 5 : 2)
     const amp = this.state === 'walking' ? 2.5 : this.state === 'working' || this.state === 'talking' ? 1.6 : 0.7
-    this.body.position.y = this.state === 'offline' ? 0 : Math.sin(this.bobPhase) * -amp
+    this.body.position.y = Math.sin(this.bobPhase) * -amp
+
+    this.resetPose()
+    this.body.position.y = Math.sin(this.bobPhase) * -amp
+
+    if (this.state === 'walking') {
+      const swing = Math.sin(this.bobPhase) * 0.5
+      this.leftArm.rotation = -swing
+      this.rightArm.rotation = swing
+      this.leftLeg.rotation = swing * 0.6
+      this.rightLeg.rotation = -swing * 0.6
+    } else if (this.state === 'working') {
+      const type = Math.sin(this.bobPhase * 2) * 0.15
+      this.leftArm.rotation = -0.3 + type
+      this.rightArm.rotation = 0.3 - type
+    } else if (this.state === 'thinking') {
+      this.thinkingDots.visible = true
+      this.thinkingDots.position.y = -88 + Math.sin(this.bobPhase * 2) * 2
+    }
+  }
+
+  private applyCustomAnimation(dt: number): void {
+    this.bobPhase += dt * 8
+    const anim = this.customAnimation ?? ''
+
+    if (anim === 'emotes/wave') {
+      this.body.position.y = Math.sin(this.bobPhase) * -1
+      this.rightArm.rotation = -Math.PI / 2 + Math.sin(this.bobPhase * 3) * 0.5
+      this.leftArm.rotation = 0
+    } else if (anim === 'emotes/determined') {
+      this.leftArm.rotation = -Math.PI / 1.3
+      this.rightArm.rotation = Math.PI / 1.3
+      this.body.scale.y = 1 + Math.sin(this.bobPhase) * 0.03
+    } else if (anim === 'emotes/thinking') {
+      this.thinkingDots.visible = true
+      this.thinkingDots.position.y = -90 + Math.sin(this.bobPhase) * 2
+      this.leftArm.rotation = -0.6
+      this.rightArm.rotation = 0.6
+    } else if (anim === 'emotes/excited') {
+      const hop = Math.abs(Math.sin(this.bobPhase * 2)) * 10
+      this.body.position.y = -hop
+      this.leftArm.rotation = -Math.PI / 1.2
+      this.rightArm.rotation = Math.PI / 1.2
+    }
   }
 }

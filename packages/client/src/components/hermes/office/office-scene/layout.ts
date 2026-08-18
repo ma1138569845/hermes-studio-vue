@@ -30,19 +30,6 @@ export interface DeskLayout {
   row: number
 }
 
-export interface DecorSpot {
-  kind: 'kitchen' | 'lounge'
-  icon: string
-  x: number
-  y: number
-}
-
-/** 工位区两侧的装饰区（镜像 DOM 降级网格的 ☕ / 🪴 区块）。 */
-export const DECOR: DecorSpot[] = [
-  { kind: 'kitchen', icon: '☕', x: 90, y: 60 },
-  { kind: 'lounge', icon: '🪴', x: SCENE_WIDTH - 90, y: SCENE_HEIGHT - 70 },
-]
-
 /**
  * 在居中网格中排布 `count` 个工位（每行最多 MAX_COLS 个）。
  * 返回 [{ id, x, y, seatX, seatY, row }] — (x,y) 是工位中心，

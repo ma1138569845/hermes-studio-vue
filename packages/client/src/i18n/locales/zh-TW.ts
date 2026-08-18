@@ -1187,7 +1187,6 @@ export default {
     title: '辦公室',
     refresh: '重新整理',
     filter: { all: '全部', open: '進行中', done: '已完成' },
-    decor: { kitchen: '茶水間', lounge: '休息區' },
     status: { busy: '忙碌', online: '在線', offline: '離線' },
     newTaskPrefix: '新任務',
     ambient1: '這個任務的進展同步一下。',
@@ -1210,6 +1209,10 @@ export default {
       chatHint: '在對話中開啟「{name}」？將切換目前 Agent 並進入聊天。',
       openChat: '開啟對話',
     },
+    stats: { online: 'Online', busy: 'Busy', openTasks: 'Open Tasks', doneToday: 'Done Today' },
+    rightPanel: { taskFlow: 'Task Flow', activity: 'Activity', activityEmpty: 'No recent activity', quickTools: 'Quick Tools', files: 'Files', browser: 'Browser' },
+    toolbar: { pauseAll: 'Pause All', resumeAll: 'Resume All', newTask: 'New Task', exportReport: 'Export Report', paused: 'All agents paused', resumed: 'All agents resumed' },
+    action: { interact: 'Interact', interactWith: 'Interact with {name}', noOnlineTargets: 'No other online agents', state: 'State', working: 'Working', workingTask: 'Working on task…', thinking: 'Thinking', thinkingTask: 'Thinking…', online: 'Online', offline: 'Offline', viewProfile: 'View Profile', interactHint: 'Send this agent to visit another online agent', stateHint: 'Change this agent\'s current state' },
   },
 
   kanban: {

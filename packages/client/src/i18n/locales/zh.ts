@@ -1197,7 +1197,6 @@ export default {
     title: '办公室',
     refresh: '刷新',
     filter: { all: '全部', open: '进行中', done: '已完成' },
-    decor: { kitchen: '茶水间', lounge: '休息区' },
     status: { busy: '忙碌', online: '在线', offline: '离线' },
     newTaskPrefix: '新任务',
     ambient1: '这个任务的进展同步一下。',
@@ -1220,6 +1219,10 @@ export default {
       chatHint: '在对话中打开「{name}」？将切换当前 Agent 并进入聊天。',
       openChat: '打开对话',
     },
+    stats: { online: '在线', busy: '忙碌', openTasks: '待办任务', doneToday: '今日完成' },
+    rightPanel: { taskFlow: '当前任务流', activity: '实时动态', activityEmpty: '暂无动态', quickTools: '快捷工具', files: '文件浏览', browser: '打开浏览器' },
+    toolbar: { pauseAll: '全部暂停', resumeAll: '全部继续', newTask: '新建任务', exportReport: '导出日报', paused: '全部 Agent 已暂停', resumed: '全部 Agent 已继续' },
+    action: { interact: '互动', interactWith: '和 {name} 互动', noOnlineTargets: '没有其他在线 Agent', state: '状态', working: '工作中', workingTask: '正在处理任务…', thinking: '思考中', thinkingTask: '思考中…', online: '在线', offline: '离线', viewProfile: '查看资料', interactHint: '派遣该 Agent 去拜访另一位在线 Agent', stateHint: '切换该 Agent 的当前状态' },
   },
 
   // 看板

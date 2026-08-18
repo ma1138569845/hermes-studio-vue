@@ -14,7 +14,6 @@ export default {
     title: 'オフィス',
     refresh: '更新',
     filter: { all: 'すべて', open: '進行中', done: '完了' },
-    decor: { kitchen: '休憩室', lounge: 'ラウンジ' },
     status: { busy: '作業中', online: 'オンライン', offline: 'オフライン' },
     newTaskPrefix: '新規タスク',
     ambient1: 'このタスクの進捗を同期しましょう。',
@@ -37,6 +36,10 @@ export default {
       chatHint: '「{name}」との会話を開きますか？アクティブエージェントを切り替えてチャットに入ります。',
       openChat: 'チャットを開く',
     },
+    stats: { online: 'Online', busy: 'Busy', openTasks: 'Open Tasks', doneToday: 'Done Today' },
+    rightPanel: { taskFlow: 'Task Flow', activity: 'Activity', activityEmpty: 'No recent activity', quickTools: 'Quick Tools', files: 'Files', browser: 'Browser' },
+    toolbar: { pauseAll: 'Pause All', resumeAll: 'Resume All', newTask: 'New Task', exportReport: 'Export Report', paused: 'All agents paused', resumed: 'All agents resumed' },
+    action: { interact: 'Interact', interactWith: 'Interact with {name}', noOnlineTargets: 'No other online agents', state: 'State', working: 'Working', workingTask: 'Working on task…', thinking: 'Thinking', thinkingTask: 'Thinking…', online: 'Online', offline: 'Offline', viewProfile: 'View Profile', interactHint: 'Send this agent to visit another online agent', stateHint: 'Change this agent\'s current state' },
   },
 
   kanban: {

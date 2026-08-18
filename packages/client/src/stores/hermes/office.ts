@@ -3,7 +3,7 @@ import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { listTasks } from '@/api/hermes/kanban'
 import { fetchProfileRuntimeStatuses } from '@/api/hermes/profiles'
-import { drainOfficeActions } from '@/api/hermes/office'
+import { drainOfficeActions, enqueueOfficeAction } from '@/api/hermes/office'
 import { useKanbanStore } from './kanban'
 import { useProfilesStore } from './profiles'
 import { agentColor } from '@/components/hermes/office/office-scene/theme'
@@ -47,14 +47,18 @@ export const useOfficeStore = defineStore('office', () => {
   let boardSnapshot: Map<string, KanbanTask> | null = null
   let dispatcherIdx = 0
 
-  const officeProfiles = computed<OfficeAgentProfile[]>(() =>
-    profilesStore.profiles.map(profile => ({
-      name: profile.name,
-      color: agentColor(profile.name),
-      online: !!gatewayRunning.value[profile.name],
-      busy: tasks.value.some(task => task.assignee === profile.name && !isDone(task) && !isArchived(task)),
-    })),
-  )
+  const officeProfiles = computed<OfficeAgentProfile[]>(() => {
+    const names = new Set<string>([
+      ...profilesStore.profiles.map(profile => profile.name),
+      ...Object.keys(gatewayRunning.value),
+    ])
+    return [...names].map(name => ({
+      name,
+      color: agentColor(name),
+      online: !!gatewayRunning.value[name],
+      busy: tasks.value.some(task => task.assignee === name && !isDone(task) && !isArchived(task)),
+    }))
+  })
 
   const ledgerTasks = computed(() => {
     const filtered = tasks.value.filter(task => {
@@ -65,6 +69,15 @@ export const useOfficeStore = defineStore('office', () => {
     })
     return [...filtered].sort((a, b) => (b.created_at ?? 0) - (a.created_at ?? 0))
   })
+
+  const onlineCount = computed(() => officeProfiles.value.filter(p => p.online).length)
+  const busyCount = computed(() => officeProfiles.value.filter(p => p.busy).length)
+  const openTaskCount = computed(() => tasks.value.filter(t => !isDone(t) && !isArchived(t)).length)
+  const doneTodayCount = computed(() => {
+    const startOfDay = new Date().setHours(0, 0, 0, 0)
+    return tasks.value.filter(t => isDone(t) && (t.updated_at ?? t.created_at ?? 0) >= startOfDay).length
+  })
+  const blockedTaskCount = computed(() => tasks.value.filter(t => String(t.status ?? '').toLowerCase() === 'blocked').length)
 
   /** 某 agent 名下未归档的任务（弹窗 tasks tab）。 */
   const tasksForAgent = (name: string): KanbanTask[] =>
@@ -213,12 +226,31 @@ export const useOfficeStore = defineStore('office', () => {
     activeAgent.value = null
   }
 
+  async function dispatchSetState(profile: string, state: 'working' | 'online' | 'offline' | 'thinking', task?: string): Promise<void> {
+    await enqueueOfficeAction({ type: 'set_state', profile, state, task })
+  }
+
+  async function dispatchDeskVisit(visitor: string, host: string, message?: string): Promise<void> {
+    await enqueueOfficeAction({ type: 'desk_visit', visitor, host, message })
+  }
+
+  async function dispatchBroadcast(message: string): Promise<void> {
+    await enqueueOfficeAction({ type: 'broadcast', message })
+  }
+
   return {
+    gatewayRunning,
+    tasks,
     officeProfiles,
     ledgerTasks,
     ledgerFilter,
     activeAgent,
     sceneAvailable,
+    onlineCount,
+    busyCount,
+    openTaskCount,
+    doneTodayCount,
+    blockedTaskCount,
     tasksForAgent,
     archivedTasksForAgent,
     load,
@@ -230,5 +262,8 @@ export const useOfficeStore = defineStore('office', () => {
     setLedgerFilter,
     openAgent,
     closeAgent,
+    dispatchSetState,
+    dispatchDeskVisit,
+    dispatchBroadcast,
   }
 })

@@ -14,7 +14,6 @@ export default {
     title: '오피스',
     refresh: '새로고침',
     filter: { all: '전체', open: '진행 중', done: '완료' },
-    decor: { kitchen: '휴게실', lounge: '라운지' },
     status: { busy: '작업 중', online: '온라인', offline: '오프라인' },
     newTaskPrefix: '새 작업',
     ambient1: '이 작업의 진행 상황을 동기화합니다.',
@@ -37,6 +36,10 @@ export default {
       chatHint: '"{name}"과(와) 대화를 열까요? 활성 에이전트를 전환하고 채팅으로 들어갑니다.',
       openChat: '채팅 열기',
     },
+    stats: { online: 'Online', busy: 'Busy', openTasks: 'Open Tasks', doneToday: 'Done Today' },
+    rightPanel: { taskFlow: 'Task Flow', activity: 'Activity', activityEmpty: 'No recent activity', quickTools: 'Quick Tools', files: 'Files', browser: 'Browser' },
+    toolbar: { pauseAll: 'Pause All', resumeAll: 'Resume All', newTask: 'New Task', exportReport: 'Export Report', paused: 'All agents paused', resumed: 'All agents resumed' },
+    action: { interact: 'Interact', interactWith: 'Interact with {name}', noOnlineTargets: 'No other online agents', state: 'State', working: 'Working', workingTask: 'Working on task…', thinking: 'Thinking', thinkingTask: 'Thinking…', online: 'Online', offline: 'Offline', viewProfile: 'View Profile', interactHint: 'Send this agent to visit another online agent', stateHint: 'Change this agent\'s current state' },
   },
 
   kanban: {
