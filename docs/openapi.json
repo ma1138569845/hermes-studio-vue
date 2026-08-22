@@ -3,7 +3,7 @@
   "info": {
     "title": "DechnicAuditor API",
     "description": "DechnicAuditor API — chat sessions, scheduled jobs, platform channels, model management, skills, memory, logs, file browser, group chat, and terminal.",
-    "version": "0.6.43"
+    "version": "0.6.44"
   },
   "servers": [
     {
@@ -3754,6 +3754,72 @@
                 "type": "object",
                 "properties": {
                   "delegation": {
+                    "type": "object",
+                    "additionalProperties": true
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/hermes/config/fallback-providers": {
+      "get": {
+        "tags": [
+          "Config"
+        ],
+        "summary": "Get fallback-providers",
+        "description": "GET /api/hermes/config/fallback-providers",
+        "operationId": "getFallbackProviders",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Config"
+        ],
+        "summary": "Update fallback-providers",
+        "description": "PUT /api/hermes/config/fallback-providers",
+        "operationId": "updateFallbackProviders",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "fallback_providers": {
                     "type": "object",
                     "additionalProperties": true
                   }

@@ -392,7 +392,9 @@ export default {
       downloadScan: 'Scan with your phone',
       downloadScanHint: 'Android download available now',
       available: 'Available',
+      testVersion: 'Test version',
       comingSoon: 'Coming soon',
+      notReleased: 'Not released',
       downloadRequirements: 'Android 6.0 or later · ARM64',
       iosPending: 'The App Store release is in preparation',
       harmonyPending: 'The AppGallery release is in preparation',
@@ -733,6 +735,7 @@ export default {
     attachFiles: 'Attach files',
     reasoningEffort: {
       tooltip: 'Reasoning effort',
+      dragHint: 'Drag to choose · {count} levels',
       defaultLabel: 'Default',
       options: {
         default: 'Default (config.yaml)',
@@ -988,8 +991,8 @@ export default {
       nodeStartRemaining: '{remaining} remaining at node start',
     },
     schedule: {
-      title: 'Workflow schedules', manage: 'Manage schedules', createTitle: 'Create schedule', editTitle: 'Edit schedule', create: 'Create schedule', save: 'Save schedule', edit: 'Edit schedule', delete: 'Delete schedule', deleteConfirm: 'Delete this schedule?', deleted: 'Schedule deleted', enable: 'Enable schedule', disable: 'Disable schedule', enabled: 'Enabled', disabled: 'Disabled', empty: 'No schedules yet', cron: 'Cron schedule', cronPlaceholder: "e.g. 0 9 * * * or {'@'}daily", timezone: 'Timezone', timezonePlaceholder: 'IANA timezone, e.g. Asia/Shanghai', initialInput: 'Initial input', initialInputPlaceholder: 'Optional input for every scheduled Run', startNodes: 'Start nodes', startNodesPlaceholder: 'Default workflow start nodes', timeout: 'Total timeout (minutes)', timeoutPlaceholder: 'No deadline', policies: 'Concurrency: skip · Missed runs: skip', lastScheduled: 'Last scheduled', nextRun: 'Next run', lastRun: 'Last Run', never: 'Never', loadFailed: 'Failed to load schedules', saveFailed: 'Failed to save schedule', saved: 'Schedule saved', deleteFailed: 'Failed to delete schedule', required: 'Cron schedule and timezone are required', reset: 'Reset',
-      presets: { hourly: 'Hourly', daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly' },
+      title: 'Workflow schedules', manage: 'Manage schedules', createTitle: 'Create schedule', editTitle: 'Edit schedule', create: 'Create schedule', save: 'Save schedule', edit: 'Edit schedule', delete: 'Delete schedule', deleteConfirm: 'Delete this schedule?', deleted: 'Schedule deleted', enable: 'Enable schedule', disable: 'Disable schedule', enabled: 'Enabled', disabled: 'Disabled', empty: 'No schedules yet', frequency: 'Run frequency', selectFrequency: 'Select a frequency...', cron: 'Cron schedule', cronPlaceholder: "e.g. 0 9 * * * or {'@'}daily", timezone: 'Timezone', timezonePlaceholder: 'IANA timezone, e.g. Asia/Shanghai', initialInput: 'Initial input', initialInputPlaceholder: 'Optional input for every scheduled Run', startNodes: 'Start nodes', startNodesPlaceholder: 'Default workflow start nodes', timeout: 'Total timeout (minutes)', timeoutPlaceholder: 'No deadline', policies: 'Concurrency: skip · Missed runs: skip', lastScheduled: 'Last scheduled', nextRun: 'Next run', lastRun: 'Last Run', never: 'Never', loadFailed: 'Failed to load schedules', saveFailed: 'Failed to save schedule', saved: 'Schedule saved', deleteFailed: 'Failed to delete schedule', required: 'Run frequency and timezone are required', reset: 'Reset',
+      presets: { everyMinute: 'Every minute', every5Minutes: 'Every 5 minutes', every30Minutes: 'Every 30 minutes', hourly: 'Every hour', daily: 'Every day', weekly: 'Every week', monthly: 'Every month', custom: 'Custom Cron expression (advanced)' },
     },
     evidence: {
       historyPage: 'Run history', detailsPage: 'Run details', backToRuns: 'Back to run history', resultStatus: 'Status', duration: 'Duration', budgetLabel: 'Budget', actualExecution: 'Executed', otherJudgments: 'Other judgments', loopEvents: 'Loop events', evaluatedNotExecuted: 'Evaluated, not executed',
@@ -1358,6 +1361,7 @@ export default {
   },
 
   // Jobs
+  scheduleBuilder: { time: 'Time', hour: 'Hour', minute: 'Minute', weekday: 'Day of week', monthDay: 'Day of month' },
   jobs: {
     title: 'Scheduled Jobs',
     createJob: 'Create Job',
@@ -1375,9 +1379,15 @@ export default {
     schedule: 'Schedule (Cron Expression)',
     schedulePlaceholder: 'e.g. 0 9 * * *',
     quickPresets: 'Quick Presets',
-    selectPreset: 'Select a preset...',
+    frequency: 'Run frequency',
+    selectPreset: 'Select a frequency...',
+    customSchedule: 'Custom schedule (advanced)',
+    frequencyDaily: 'Every day',
+    frequencyWeekly: 'Every week',
+    frequencyMonthly: 'Every month',
     presetEveryMinute: 'Every minute',
     presetEvery5Min: 'Every 5 minutes',
+    presetEvery30Min: 'Every 30 minutes',
     presetEveryHour: 'Every hour',
     presetEveryDay: 'Every day at 00:00',
     presetEveryDay9: 'Every day at 09:00',
@@ -1708,6 +1718,7 @@ export default {
     providerReconnectHint: 'Changes apply to new runs. Existing chat or coding-agent sessions must reconnect.',
     testConnection: 'Test connection',
     providerTestSuccess: 'Connection succeeded; {count} models found',
+    providerTestNoCatalog: 'Reachable, but this endpoint does not list models. Enter the model ID yourself, and check the base URL if you expected a list.',
     providerTestFailed: 'Provider connection test failed',
     providerTestFailedTitle: 'Connection test failed',
     providerSaveAnywayHint: 'You can still save these settings explicitly, but the provider may be unavailable.',
@@ -1842,6 +1853,16 @@ export default {
     delegationSaveFailed: 'Failed to save subagent model',
     auxiliarySubtitle: 'Side-task model overrides for compression, vision, approvals, MCP, and background maintenance.',
     combinationTitle: 'Model Ensembles',
+    fallbackTitle: 'Fallback',
+    fallbackSubtitle: 'If the main model fails, Hermes tries these in order without losing the conversation.',
+    fallbackAdd: 'Add fallback',
+    fallbackReorderHint: 'Drag a row to change the order Hermes tries them in. With the keyboard, focus a row and hold Alt with the up or down arrow.',
+    fallbackRowAria: 'Fallback {position} of {total}',
+    fallbackEmpty: 'No fallback models yet.',
+    fallbackSaved: 'Fallback chain saved',
+    fallbackSaveFailed: 'Failed to save the fallback chain',
+    fallbackLoadFailed: 'Failed to load the fallback chain',
+    fallbackAppliesToNewSessions: 'Applies to sessions started after saving; running sessions keep the chain they began with.',
     combinationSubtitle: 'Configure MoA presets: reference models provide perspectives first, then one aggregator model handles the final response and tool calls.',
     combinationPreset: 'Preset',
     combinationName: 'Name',
@@ -3269,6 +3290,14 @@ export default {
 
   // Changelog
   changelog: {
+    new_0_6_44_1: 'This release covers all 13 PRs merged after v0.6.43, focused on live Group Chat history and activity, App connection reliability, provider usability, and Agent Bridge persistence',
+    new_0_6_44_2: 'Group Chat now shows active Agent runs across rooms, places a taller Tool panel above the transcript, lets the active room section collapse, and loads complete history directly in the live room (#2572, #2573, #2584, #2594)',
+    new_0_6_44_3: 'App connections now prefer physical LAN addresses over VPN adapters, refresh stale relay pairing codes correctly, and serve compact profile avatars to mobile clients (#2591, #2592, #2598)',
+    new_0_6_44_4: 'The public website adds an English and Chinese privacy policy covering Google user data, permission revocation, storage, sharing, and Limited Use requirements (#2590)',
+    new_0_6_44_5: 'Model and Provider workflows remember collapsed provider groups across pickers, while reachable providers without a model catalog can be saved with a clear warning instead of a false connection failure (#2585, #2587)',
+    new_0_6_44_6: 'The file manager now accepts valid names beginning with multiple dots, such as ..hidden, while continuing to block real parent-directory traversal (#2586)',
+    new_0_6_44_7: 'Web UI conversations now receive the configured fallback provider chain, allowing an eligible primary-model failure such as a rate limit to switch to a backup provider (#2599)',
+    new_0_6_44_8: 'Chat history no longer stores the same user message twice when Studio and Hermes share the session database; failed early writes still fall back to native persistence so messages are not lost (#2601)',
     new_0_6_43_1: 'This release covers all 19 PRs merged after v0.6.42, centered on Pi and native Coding Agent commands, secure App and device connections, complete Group Chat history, cancellable queues, and reliability improvements',
     new_0_6_43_2: 'Pi joins Studio as a managed Coding Agent with scoped and Global RPC sessions, live text and reasoning, Studio approvals and clarifications, isolated configuration, lazy MCP tools, provider routing, and native session continuity (#2528)',
     new_0_6_43_3: 'Codex, Claude, and Pi chats now handle /context, /compact, /usage, and /status before prompts reach the CLI; /compact uses each Agent’s native compaction and reports native failures without an unsafe Studio fallback (#2566)',
