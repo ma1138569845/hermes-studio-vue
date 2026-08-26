@@ -44,6 +44,8 @@ describe.skipIf(process.platform === 'win32')('Hermes plugin configuration', () 
     chmodSync(fakeHermes, 0o755)
 
     process.env.HERMES_BIN = fakeHermes
+    process.env.HERMES_AGENT_ROOT = agentRoot
+    process.env.HERMES_AGENT_BRIDGE_PYTHON = fakePython
     process.env.PLUGIN_JSON = JSON.stringify({
       plugins: [{
         key: 'local-plugin',

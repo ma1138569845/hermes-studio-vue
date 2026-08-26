@@ -1,4 +1,7 @@
+import { socialMessagesEs } from '../social-messages-locales'
+
 export default {
+  socialMessages: socialMessagesEs,
   browser: {
     title: 'Navegador', settings: 'Ajustes del navegador', desktopOnly: 'El navegador integrado solo está disponible en DechnicAuditor Desktop.', newTab: 'Nueva pestaña',
     back: 'Atrás', forward: 'Adelante', reload: 'Recargar', stop: 'Detener', addressPlaceholder: 'Buscar o escribir una dirección',
@@ -255,6 +258,7 @@ export default {
     journey: 'Trayectoria',
     skillsUsage: 'Uso de habilidades',
     channels: 'Canales',
+    socialMessages: 'Enviar mensajes',
     terminal: 'Terminal',
     browser: 'Navegador',
     singleChat: 'Chat',
@@ -426,6 +430,7 @@ export default {
       scanToAdd: 'Escanear para añadir',
       viewList: 'Lista',
       viewDownload: 'Descargar',
+      viewMessages: 'Envío de mensajes',
       downloadTitle: 'HStudio en tu teléfono',
       downloadDescription: 'Estamos en fase beta cerrada. Se necesita un código de registro para crear una cuenta y publicaremos algunos códigos en nuestras redes sociales.',
       downloadScan: 'Escanea con tu teléfono',
@@ -736,6 +741,8 @@ export default {
       },
     },
     showToolCalls: 'Mostrar llamadas de herramientas',
+    pushEnabled: 'Activar envío',
+    pushNotConfigured: 'Configura las notificaciones en «Conexiones de dispositivos» de Hermes Studio antes de activarlas.',
     hideToolCalls: 'Ocultar llamadas de herramientas',
     messageQueue: 'Cola de mensajes',
     removeQueuedMessage: 'Quitar mensaje de la cola',
@@ -2879,6 +2886,15 @@ jobTriggered: 'Job ejecutado',
   },
 
   changelog: {
+    new_0_6_47_1: 'Esta versión incluye los 13 PR fusionados después de v0.6.46, encabezados por el envío independiente de mensajes sociales, modelos de imagen configurables, transiciones de chat más fiables y mejoras puntuales de la interfaz',
+    new_0_6_47_2: 'El nuevo espacio Mensajes sociales administra conexiones independientes de Telegram, Feishu y Weixin, idiomas de notificación por canal, avisos localizados de vinculación y estado, y controles de envío por sesión (#2718)',
+    new_0_6_47_3: 'La generación y edición de imágenes ya pueden usar proveedores y modelos específicos en Modelos auxiliares; las selecciones explícitas de la solicitud y los valores predeterminados existentes conservan su prioridad (#2691)',
+    new_0_6_47_4: 'Las salas de chat grupal ahora iluminan todo el avatar compuesto cuando hay algún Agent en ejecución, y los enlaces del espacio de trabajo con línea o columna abren la vista previa del archivo correcto (#2701, #2702)',
+    new_0_6_47_5: 'Las aprobaciones del Gateway ahora resuelven la solicitud exacta interrumpida o respondida, y App Relay conserva If-Match para mutaciones condicionales seguras (#2681, #2710)',
+    new_0_6_47_6: 'Los proxies de Codex y Claude consolidan las instrucciones system en un único mensaje inicial, recuperando la compatibilidad con proveedores basados en vLLM que exigen el orden de mensajes (#2688, #2714)',
+    new_0_6_47_7: 'El límite de carga se puede configurar con HERMES_MAX_UPLOAD_SIZE y los README ya documentan el alias de CLI hermes-web-ui-mcp (#2689, #2704)',
+    new_0_6_47_8: 'La reanudación del chat de la App puede reutilizar páginas de mensajes sin cambios de la caché mientras actualiza metadatos de ejecución, cola, uso y sesión, reduciendo los datos transferidos al volver al primer plano (#2719)',
+    new_0_6_47_9: 'Los cambios de normalización del razonamiento de GLM-5.3 y selección de sesión de #2706 fueron revertidos por completo en #2708; se mantiene el comportamiento de v0.6.46 mientras se reconsidera la solución',
     new_0_6_46_1: 'Esta versión incluye los 13 PR fusionados después de v0.6.45 y mejora la navegación de sesiones e historial, los Agents reutilizables del chat grupal, los espacios de trabajo con Git, el enrutamiento seguro de App Relay y la fiabilidad de las ejecuciones reanudables',
     new_0_6_46_2: 'Las sesiones recientes se pueden contraer y muestran su categoría; el historial agrupa las llamadas de herramientas completadas igual que el chat en vivo (#2642, #2697)',
     new_0_6_46_3: 'El chat grupal añade ajustes predefinidos de Agent reutilizables con selección y gestión separadas, errores de nombres duplicados localizados, validación de modelos deshabilitados y el brillo arcoíris restaurado para Agents activos (#2644, #2670, #2678)',
