@@ -55,14 +55,22 @@ export interface KnowledgeChunk {
   metadata: Record<string, unknown>;
 }
 
+export type WikiReviewStatus = "pending" | "approved" | "rejected";
+
 export interface WikiPage {
   id: string;
   kb_id?: string;
+  doc_id?: string | null;
+  folder_id?: string | null;
+  folder_path?: string;
   title: string;
   slug?: string;
   content?: string;
   status?: string;
-  review_status?: string;
+  review_status?: WikiReviewStatus | string;
+  source?: "folder" | "doc" | "unknown" | string;
+  quality_score?: number | null;
+  quality_report?: Record<string, unknown> | null;
   updated_at: string;
 }
 
@@ -81,12 +89,20 @@ export interface KnowledgeRelationship {
   description: string;
 }
 
+export type SearchMode = "vector" | "graph" | "wiki" | "graph_wiki" | "unified";
+
 export interface SearchResult {
   score: number;
-  filename: string;
-  chapter: string;
-  text: string;
-  metadata: Record<string, unknown>;
+  filename?: string;
+  chapter?: string;
+  text?: string;
+  title?: string;
+  wiki_id?: string;
+  type?: string;
+  answer?: string;
+  entities?: KnowledgeEntity[];
+  relationships?: KnowledgeRelationship[];
+  metadata?: Record<string, unknown>;
 }
 
 export interface KbStats {
@@ -96,4 +112,52 @@ export interface KbStats {
   failed: number;
   total_size: number;
   orphaned: number;
+}
+
+export interface VectorizationJob {
+  id: string;
+  kb_id: string;
+  doc_id: string;
+  status: string;
+  progress: number;
+  chunks_done?: number;
+  chunks_total?: number;
+  error?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  created_at: string;
+}
+
+export interface CurationJob {
+  id: string;
+  kb_id: string;
+  folder_id?: string | null;
+  job_type?: string;
+  status: string;
+  input_pages?: unknown;
+  output_pages?: unknown;
+  error_message?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  created_at: string;
+}
+
+export interface DocPreview {
+  id: string;
+  path: string;
+  file_name: string;
+  content: string;
+  lines: number;
+  size: number;
+  summary: string;
+}
+
+export interface PipelineJobAck {
+  job_id?: string | null;
+  doc_id?: string;
+  status?: string;
+  skipped?: boolean;
+  reason?: string;
+  wiki_id?: string;
+  [key: string]: unknown;
 }

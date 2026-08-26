@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, h } from "vue";
+import { ref, onMounted, onUnmounted, computed, h, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
   NButton,
@@ -8,22 +8,39 @@ import {
   NInput,
   NTag,
   NSpin,
-  NModal,
+  NDrawer,
+  NDrawerContent,
   NPopconfirm,
   NUpload,
   NTree,
   NDataTable,
   NEmpty,
   NSpace,
+  NSelect,
+  NDropdown,
+  NAlert,
+  NPagination,
   useMessage,
+  useDialog,
+  type DropdownOption,
 } from "naive-ui";
-import type { DataTableColumns, TreeOption, UploadFileInfo } from "naive-ui";
+import type { DataTableColumns, TreeOption, UploadFileInfo, SelectOption } from "naive-ui";
 import { useI18n } from "vue-i18n";
 import { useKnowledgeBaseStore } from "@/stores/hermes/knowledge-base";
-import type { KnowledgeDocument, DocStatus, SearchResult, WikiPage } from "@/types/knowledge-base";
+import type {
+  KnowledgeDocument,
+  DocStatus,
+  SearchResult,
+  WikiPage,
+  SearchMode,
+  WikiReviewStatus,
+} from "@/types/knowledge-base";
+import KbPipelineDrawer from "@/components/hermes/knowledge/KbPipelineDrawer.vue";
+import MarkdownRenderer from "@/components/hermes/chat/MarkdownRenderer.vue";
 
 const { t } = useI18n();
 const message = useMessage();
+const dialog = useDialog();
 const route = useRoute();
 const router = useRouter();
 const store = useKnowledgeBaseStore();
@@ -31,33 +48,53 @@ const store = useKnowledgeBaseStore();
 const kbId = computed(() => route.params.kbId as string);
 const activeTab = ref("documents");
 
-// ─── Folder state ───────────────────────────────────────────────────
 const selectedFolderId = ref<string | null>(null);
 const showCreateFolder = ref(false);
 const newFolderName = ref("");
-
-// ─── Upload ─────────────────────────────────────────────────────────
 const uploading = ref(false);
-
-// ─── Search ─────────────────────────────────────────────────────────
 const searchQuery = ref("");
-const searching = ref(false);
-
-// ─── Wiki (read-only preview of upstream-generated pages) ───────────
+const searchMode = ref<SearchMode>("vector");
+const checkedKeys = ref<string[]>([]);
+const showDrawer = ref(false);
+const drawerDoc = ref<KnowledgeDocument | null>(null);
 const showWiki = ref(false);
+const wikiFilter = ref<string>("all");
+const generateBusy = ref(false);
+const actionBusy = ref(false);
 
-// ─── Document preview ───────────────────────────────────────────────
-const previewDoc = ref<KnowledgeDocument | null>(null);
-const showPreview = ref(false);
+const searchModeOptions: SelectOption[] = [
+  { label: t("knowledgeBase.searchModeVector"), value: "vector" },
+  { label: t("knowledgeBase.searchModeWiki"), value: "wiki" },
+  { label: t("knowledgeBase.searchModeGraph"), value: "graph" },
+  { label: t("knowledgeBase.searchModeUnified"), value: "unified" },
+];
+
+const wikiFilterOptions: SelectOption[] = [
+  { label: t("knowledgeBase.reviewAll"), value: "all" },
+  { label: t("knowledgeBase.reviewPending"), value: "pending" },
+  { label: t("knowledgeBase.reviewApproved"), value: "approved" },
+  { label: t("knowledgeBase.reviewRejected"), value: "rejected" },
+];
+
+const generateOptions: DropdownOption[] = [
+  { label: t("knowledgeBase.folderWiki"), key: "folder-wiki" },
+  { label: t("knowledgeBase.bulkWiki"), key: "bulk-wiki" },
+  { label: t("knowledgeBase.hierarchicalWiki"), key: "hierarchical" },
+  { label: t("knowledgeBase.curateApproved"), key: "curate" },
+];
 
 onMounted(async () => {
   await store.selectBase(kbId.value);
-  if (store.currentKb) {
-    await store.fetchWikiPages(kbId.value);
-  }
 });
 
-// ─── Folder tree data ───────────────────────────────────────────────
+onUnmounted(() => {
+  store.stopPolling();
+});
+
+watch(wikiFilter, async (value) => {
+  await store.fetchWikiPages(kbId.value, value === "all" ? undefined : value);
+});
+
 const treeData = computed<TreeOption[]>(() => {
   function buildTree(parentId: string | null): TreeOption[] {
     return store.folders
@@ -77,40 +114,53 @@ const treeData = computed<TreeOption[]>(() => {
   ];
 });
 
-function handleTreeNodeSelect(keys: string[]) {
-  const key = keys[0];
-  selectedFolderId.value = key === "__root__" ? null : key;
-  store.fetchDocuments(kbId.value, { folder_id: selectedFolderId.value || undefined });
+function folderOpts() {
+  return { folder_id: selectedFolderId.value || undefined };
 }
 
-// ─── Document table ─────────────────────────────────────────────────
+function handleTreeNodeSelect(keys: Array<string | number>) {
+  const key = String(keys[0] ?? "__root__");
+  selectedFolderId.value = key === "__root__" ? null : key;
+  checkedKeys.value = [];
+  void store.fetchDocuments(kbId.value, { ...folderOpts(), page: 1 });
+}
+
+function formatBytes(size: number): string {
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function statusType(status: DocStatus): "default" | "info" | "success" | "error" {
+  if (status === "completed") return "success";
+  if (status === "processing") return "info";
+  if (status === "failed") return "error";
+  return "default";
+}
+
+function openDrawer(doc: KnowledgeDocument) {
+  drawerDoc.value = doc;
+  showDrawer.value = true;
+}
+
 const docColumns: DataTableColumns<KnowledgeDocument> = [
+  { type: "selection" },
   { title: t("knowledgeBase.fileName"), key: "file_name", ellipsis: { tooltip: true } },
-  { title: t("knowledgeBase.fileType"), key: "file_type", width: 80 },
+  { title: t("knowledgeBase.fileType"), key: "file_type", width: 72 },
   {
     title: t("knowledgeBase.fileSize"),
     key: "file_size",
-    width: 100,
+    width: 88,
     render(row) {
-      return row.file_size < 1024
-        ? `${row.file_size} B`
-        : row.file_size < 1024 * 1024
-          ? `${(row.file_size / 1024).toFixed(1)} KB`
-          : `${(row.file_size / (1024 * 1024)).toFixed(1)} MB`;
+      return formatBytes(row.file_size);
     },
   },
   {
     title: t("knowledgeBase.status"),
     key: "parse_status",
-    width: 100,
+    width: 108,
     render(row) {
-      const typeMap: Record<DocStatus, "default" | "info" | "success" | "error"> = {
-        pending: "default",
-        processing: "info",
-        completed: "success",
-        failed: "error",
-      };
-      return h(NTag, { size: "small", type: typeMap[row.parse_status], bordered: false }, () =>
+      return h(NTag, { size: "small", type: statusType(row.parse_status), bordered: false }, () =>
         t(`knowledgeBase.status_${row.parse_status}`),
       );
     },
@@ -118,27 +168,30 @@ const docColumns: DataTableColumns<KnowledgeDocument> = [
   {
     title: t("knowledgeBase.chunks"),
     key: "chunk_count",
-    width: 70,
+    width: 64,
     align: "center",
-  },
-  {
-    title: t("knowledgeBase.createdAt"),
-    key: "created_at",
-    width: 120,
-    render(row) {
-      return new Date(row.created_at).toLocaleDateString();
-    },
   },
   {
     title: t("common.actions"),
     key: "actions",
-    width: 150,
+    width: 168,
     render(row) {
       return h(NSpace, { size: "small" }, () => [
         h(
           NButton,
-          { size: "tiny", text: true, onClick: () => openPreview(row) },
-          () => t("common.preview"),
+          {
+            size: "tiny",
+            text: true,
+            disabled: row.parse_status === "processing",
+            onClick: () => void handleVectorizeOne(row),
+          },
+          () =>
+            row.parse_status === "completed"
+              ? t("knowledgeBase.revectorize")
+              : t("knowledgeBase.vectorize"),
+        ),
+        h(NButton, { size: "tiny", text: true, onClick: () => openDrawer(row) }, () =>
+          t("knowledgeBase.open"),
         ),
         h(
           NPopconfirm,
@@ -146,6 +199,7 @@ const docColumns: DataTableColumns<KnowledgeDocument> = [
           {
             trigger: () =>
               h(NButton, { size: "tiny", text: true, type: "error" }, () => t("common.delete")),
+            default: () => t("knowledgeBase.deleteDocConfirm"),
           },
         ),
       ]);
@@ -153,22 +207,30 @@ const docColumns: DataTableColumns<KnowledgeDocument> = [
   },
 ];
 
-function openPreview(doc: KnowledgeDocument) {
-  previewDoc.value = doc;
-  showPreview.value = true;
+async function handleVectorizeOne(doc: KnowledgeDocument) {
+  try {
+    await store.vectorizeDoc(kbId.value, doc.id);
+    message.success(t("knowledgeBase.actionStarted"));
+  } catch (err: any) {
+    message.error(err.message || t("knowledgeBase.actionFailed"));
+  }
 }
 
 async function handleDeleteDoc(doc: KnowledgeDocument) {
   try {
     await store.deleteDoc(kbId.value, doc.id);
+    checkedKeys.value = checkedKeys.value.filter((id) => id !== doc.id);
     message.success(t("common.deleted"));
   } catch (err: any) {
     message.error(err.message || t("common.deleteFailed"));
   }
 }
 
-// ─── Upload handler ─────────────────────────────────────────────────
-async function handleUpload(options: { file: UploadFileInfo; onFinish: () => void; onError: () => void }) {
+async function handleUpload(options: {
+  file: UploadFileInfo;
+  onFinish: () => void;
+  onError: () => void;
+}) {
   uploading.value = true;
   try {
     const rawFile = (options.file as any).file as File | undefined;
@@ -177,7 +239,7 @@ async function handleUpload(options: { file: UploadFileInfo; onFinish: () => voi
     }
     message.success(t("knowledgeBase.uploadSuccess"));
     options.onFinish();
-    await store.fetchDocuments(kbId.value, { folder_id: selectedFolderId.value || undefined });
+    await store.fetchDocuments(kbId.value, folderOpts());
   } catch (err: any) {
     message.error(err.message || t("knowledgeBase.uploadFailed"));
     options.onError();
@@ -186,7 +248,6 @@ async function handleUpload(options: { file: UploadFileInfo; onFinish: () => voi
   }
 }
 
-// ─── Folder creation ────────────────────────────────────────────────
 async function handleCreateFolder() {
   if (!newFolderName.value.trim()) return;
   try {
@@ -199,30 +260,145 @@ async function handleCreateFolder() {
   }
 }
 
-// ─── Search ─────────────────────────────────────────────────────────
-async function handleSearch() {
-  if (!searchQuery.value.trim()) return;
-  searching.value = true;
+function confirmLlm(): Promise<boolean> {
+  return new Promise((resolve) => {
+    dialog.warning({
+      title: t("knowledgeBase.llmConfirmTitle"),
+      content: t("knowledgeBase.llmConfirmBody"),
+      positiveText: t("common.confirm"),
+      negativeText: t("common.cancel"),
+      onPositiveClick: () => resolve(true),
+      onNegativeClick: () => resolve(false),
+      onClose: () => resolve(false),
+    });
+  });
+}
+
+async function handleGenerate(key: string | number) {
+  if (!(await confirmLlm())) return;
+  generateBusy.value = true;
   try {
-    await store.search(kbId.value, searchQuery.value.trim());
+    const folderId = selectedFolderId.value;
+    if (key === "folder-wiki") await store.folderWiki(kbId.value, folderId, false);
+    else if (key === "bulk-wiki") await store.bulkWiki(kbId.value, { folderId });
+    else if (key === "hierarchical") await store.hierarchicalWiki(kbId.value, { folderId });
+    else if (key === "curate") {
+      await store.curateWiki(kbId.value, { folderId, reviewStatus: "approved" });
+    }
+    message.success(t("knowledgeBase.actionStarted"));
+    activeTab.value = key === "curate" || key === "bulk-wiki" ? "jobs" : "wiki";
+  } catch (err: any) {
+    message.error(err.message || t("knowledgeBase.actionFailed"));
   } finally {
-    searching.value = false;
+    generateBusy.value = false;
   }
 }
 
-// ─── Wiki (read-only) ───────────────────────────────────────────────
+async function handleRebuild() {
+  generateBusy.value = true;
+  try {
+    await store.rebuildBase(kbId.value);
+    message.success(t("knowledgeBase.rebuildQueued"));
+  } catch (err: any) {
+    message.error(err.message || t("knowledgeBase.actionFailed"));
+  } finally {
+    generateBusy.value = false;
+  }
+}
+
+async function handleBatch(kind: "embed" | "wiki" | "delete") {
+  const ids = [...checkedKeys.value];
+  if (!ids.length) return;
+  if (kind === "delete") {
+    try {
+      await store.bulkDelete(kbId.value, ids);
+      checkedKeys.value = [];
+      message.success(t("common.deleted"));
+    } catch (err: any) {
+      message.error(err.message || t("common.deleteFailed"));
+    }
+    return;
+  }
+  if (kind === "wiki" && !(await confirmLlm())) return;
+  actionBusy.value = true;
+  try {
+    if (kind === "embed") {
+      for (const id of ids) await store.vectorizeDoc(kbId.value, id);
+    } else {
+      await store.bulkWiki(kbId.value, { docIds: ids });
+      activeTab.value = "jobs";
+    }
+    checkedKeys.value = [];
+    message.success(t("knowledgeBase.actionStarted"));
+  } catch (err: any) {
+    message.error(err.message || t("knowledgeBase.actionFailed"));
+  } finally {
+    actionBusy.value = false;
+  }
+}
+
+async function handleSearch() {
+  if (!searchQuery.value.trim()) return;
+  activeTab.value = "search";
+  try {
+    await store.search(kbId.value, searchQuery.value.trim(), { mode: searchMode.value, limit: 12 });
+  } catch (err: any) {
+    message.error(err.message || t("knowledgeBase.actionFailed"));
+  }
+}
+
 async function openWiki(page: WikiPage) {
   await store.fetchWikiPage(page.id);
   showWiki.value = true;
 }
 
-// ─── Search result columns ──────────────────────────────────────────
+async function handleReview(status: WikiReviewStatus) {
+  const page = store.currentWikiPage;
+  if (!page) return;
+  try {
+    await store.reviewWiki(page.id, status);
+    message.success(t("common.saved"));
+  } catch (err: any) {
+    message.error(err.message || t("common.saveFailed"));
+  }
+}
+
+async function handleEvaluate() {
+  const page = store.currentWikiPage;
+  if (!page) return;
+  if (!(await confirmLlm())) return;
+  try {
+    await store.evaluateWiki(page.id);
+    message.success(t("knowledgeBase.qualityUpdated"));
+  } catch (err: any) {
+    message.error(err.message || t("knowledgeBase.actionFailed"));
+  }
+}
+
+function reviewType(status?: string): "default" | "success" | "error" | "warning" {
+  if (status === "approved") return "success";
+  if (status === "rejected") return "error";
+  if (status === "pending") return "warning";
+  return "default";
+}
+
 const searchColumns: DataTableColumns<SearchResult> = [
-  { title: t("knowledgeBase.fileName"), key: "filename", width: 180, ellipsis: { tooltip: true } },
+  {
+    title: t("knowledgeBase.fileName"),
+    key: "filename",
+    width: 180,
+    ellipsis: { tooltip: true },
+    render(row) {
+      return row.filename || row.title || row.type || "—";
+    },
+  },
   {
     title: t("knowledgeBase.content"),
     key: "text",
     ellipsis: { tooltip: true },
+    render(row) {
+      return row.text || row.answer || "";
+    },
   },
   {
     title: t("knowledgeBase.score"),
@@ -230,28 +406,77 @@ const searchColumns: DataTableColumns<SearchResult> = [
     width: 80,
     align: "center",
     render(row) {
-      return row.score.toFixed(2);
+      return typeof row.score === "number" ? row.score.toFixed(2) : "—";
     },
   },
 ];
+
+function onPageChange(page: number) {
+  void store.fetchDocuments(kbId.value, { ...folderOpts(), page });
+}
+
+function onPageSizeChange(pageSize: number) {
+  void store.fetchDocuments(kbId.value, { ...folderOpts(), page: 1, page_size: pageSize });
+}
+
+const jobRows = computed(() => {
+  const vec = store.vectorJobs.map((j) => ({
+    id: j.id,
+    kind: t("knowledgeBase.vectorize"),
+    status: j.status,
+    detail: j.error || `${j.progress ?? 0}%`,
+    created_at: j.created_at,
+  }));
+  const cur = store.curationJobs.map((j) => ({
+    id: j.id,
+    kind: j.job_type || t("knowledgeBase.curate"),
+    status: j.status,
+    detail: j.error_message || "",
+    created_at: j.created_at,
+  }));
+  return [...vec, ...cur].sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+});
 </script>
 
 <template>
   <div class="kb-detail-view">
-    <!-- Header -->
     <div class="kb-detail-header">
       <NButton text @click="router.push({ name: 'hermes.knowledgeBase' })">
         ← {{ t("common.back") }}
       </NButton>
       <h1 v-if="store.currentKb" class="kb-detail-title">{{ store.currentKb.name }}</h1>
+      <div v-if="store.stats" class="kb-stat-chips">
+        <span>{{ store.stats.total_documents }} {{ t("knowledgeBase.documents") }}</span>
+        <span>{{ store.stats.completed }} {{ t("knowledgeBase.completed") }}</span>
+        <span>{{ store.stats.processing }} {{ t("knowledgeBase.processing") }}</span>
+        <span v-if="store.stats.failed">{{ store.stats.failed }} {{ t("knowledgeBase.failed") }}</span>
+      </div>
+      <NSpace v-if="store.currentKb" class="kb-header-actions">
+        <NDropdown :options="generateOptions" trigger="click" @select="handleGenerate">
+          <NButton size="small" :loading="generateBusy">{{ t("knowledgeBase.generate") }}</NButton>
+        </NDropdown>
+        <NPopconfirm @positive-click="handleRebuild">
+          <template #trigger>
+            <NButton size="small">{{ t("knowledgeBase.rebuild") }}</NButton>
+          </template>
+          {{ t("knowledgeBase.rebuildConfirm") }}
+        </NPopconfirm>
+      </NSpace>
     </div>
 
-    <NSpin :show="store.loading">
+    <NAlert
+      v-if="store.loadError"
+      type="error"
+      :title="t('knowledgeBase.upstreamError')"
+      style="margin-bottom: 16px"
+    >
+      {{ store.loadError }}
+    </NAlert>
+
+    <NSpin :show="store.loading && !store.hasActiveJobs">
       <NTabs v-if="store.currentKb" v-model:value="activeTab" type="line">
-        <!-- Documents Tab -->
         <NTabPane name="documents" :tab="t('knowledgeBase.documents')">
           <div class="kb-detail-layout">
-            <!-- Left: Folder Tree -->
             <aside class="kb-sidebar">
               <div class="kb-sidebar-header">
                 <span class="kb-sidebar-title">{{ t("knowledgeBase.folders") }}</span>
@@ -274,19 +499,14 @@ const searchColumns: DataTableColumns<SearchResult> = [
                 :data="treeData"
                 :default-expanded-keys="['__root__']"
                 block-line
+                selectable
                 @update:selected-keys="handleTreeNodeSelect"
               />
             </aside>
 
-            <!-- Right: Document Table -->
             <main class="kb-main">
               <div class="kb-toolbar">
-                <NUpload
-                  :show-file-list="false"
-                  multiple
-                  accept="*"
-                  :custom-request="handleUpload"
-                >
+                <NUpload :show-file-list="false" multiple accept="*" :custom-request="handleUpload">
                   <NButton type="primary" size="small" :loading="uploading">
                     {{ t("knowledgeBase.upload") }}
                   </NButton>
@@ -297,34 +517,69 @@ const searchColumns: DataTableColumns<SearchResult> = [
                   :placeholder="t('knowledgeBase.searchPlaceholder')"
                   clearable
                   style="width: 240px"
-                  @keyup.enter="activeTab = 'search'; handleSearch()"
+                  @keyup.enter="handleSearch"
                 />
               </div>
+
+              <div v-if="checkedKeys.length" class="kb-batch">
+                <span>{{ t("knowledgeBase.selectedCount", { n: checkedKeys.length }) }}</span>
+                <NButton size="tiny" :loading="actionBusy" @click="handleBatch('embed')">
+                  {{ t("knowledgeBase.vectorize") }}
+                </NButton>
+                <NButton size="tiny" :loading="actionBusy" @click="handleBatch('wiki')">
+                  {{ t("knowledgeBase.wiki") }}
+                </NButton>
+                <NPopconfirm @positive-click="handleBatch('delete')">
+                  <template #trigger>
+                    <NButton size="tiny" type="error">{{ t("common.delete") }}</NButton>
+                  </template>
+                  {{ t("knowledgeBase.bulkDeleteConfirm") }}
+                </NPopconfirm>
+              </div>
+
               <NDataTable
                 v-if="store.documents.length > 0"
                 :columns="docColumns"
                 :data="store.documents"
                 :row-key="(row: KnowledgeDocument) => row.id"
+                :checked-row-keys="checkedKeys"
                 size="small"
                 :bordered="false"
                 :single-line="false"
+                @update:checked-row-keys="(keys) => (checkedKeys = keys as string[])"
               />
               <NEmpty v-else :description="t('knowledgeBase.noDocuments')" />
+              <div v-if="store.docTotal > store.docPageSize" class="kb-pager">
+                <NPagination
+                  :page="store.docPage"
+                  :page-size="store.docPageSize"
+                  :item-count="store.docTotal"
+                  show-size-picker
+                  :page-sizes="[20, 50, 100]"
+                  @update:page="onPageChange"
+                  @update:page-size="onPageSizeChange"
+                />
+              </div>
             </main>
           </div>
         </NTabPane>
 
-        <!-- Search Tab -->
         <NTabPane name="search" :tab="t('knowledgeBase.search')">
           <div class="kb-search-panel">
             <NSpace>
               <NInput
                 v-model:value="searchQuery"
                 :placeholder="t('knowledgeBase.searchPlaceholder')"
-                style="width: 400px"
+                style="width: 360px"
                 @keyup.enter="handleSearch"
               />
-              <NButton type="primary" :loading="searching" @click="handleSearch">
+              <NSelect
+                v-model:value="searchMode"
+                :options="searchModeOptions"
+                style="width: 140px"
+                size="small"
+              />
+              <NButton type="primary" :loading="store.searchLoading" @click="handleSearch">
                 {{ t("knowledgeBase.search") }}
               </NButton>
             </NSpace>
@@ -336,19 +591,24 @@ const searchColumns: DataTableColumns<SearchResult> = [
               style="margin-top: 16px"
             />
             <NEmpty
-              v-else-if="!searching"
+              v-else-if="!store.searchLoading"
               :description="t('knowledgeBase.noSearchResults')"
               style="margin-top: 32px"
             />
           </div>
         </NTabPane>
 
-        <!-- Wiki Tab -->
         <NTabPane name="wiki" :tab="t('knowledgeBase.wiki')">
           <div class="kb-wiki-panel">
-            <div v-if="store.wikiPages.length === 0" class="kb-empty">
-              <NEmpty :description="t('knowledgeBase.noWikiPages')" />
+            <div class="kb-toolbar">
+              <NSelect
+                v-model:value="wikiFilter"
+                :options="wikiFilterOptions"
+                size="small"
+                style="width: 180px"
+              />
             </div>
+            <NEmpty v-if="store.wikiPages.length === 0" :description="t('knowledgeBase.noWikiPages')" />
             <div v-else class="kb-wiki-grid">
               <article
                 v-for="page in store.wikiPages"
@@ -358,7 +618,13 @@ const searchColumns: DataTableColumns<SearchResult> = [
               >
                 <h3>{{ page.title }}</h3>
                 <div class="kb-wiki-meta">
-                  <NTag size="small" :bordered="false">{{ page.review_status || page.status }}</NTag>
+                  <NTag size="small" :type="reviewType(page.review_status)" :bordered="false">
+                    {{ page.review_status || page.status }}
+                  </NTag>
+                  <NTag v-if="page.source" size="small" :bordered="false">{{ page.source }}</NTag>
+                  <NTag v-if="page.quality_score != null" size="small" :bordered="false">
+                    {{ t("knowledgeBase.quality") }} {{ Number(page.quality_score).toFixed(1) }}
+                  </NTag>
                 </div>
                 <time>{{ new Date(page.updated_at).toLocaleDateString() }}</time>
               </article>
@@ -366,63 +632,80 @@ const searchColumns: DataTableColumns<SearchResult> = [
           </div>
         </NTabPane>
 
-        <!-- Stats Tab -->
-        <NTabPane v-if="store.stats" name="stats" :tab="t('knowledgeBase.stats')">
-          <div class="kb-stats-panel">
-            <div class="kb-stat-item">
-              <span class="kb-stat-value">{{ store.stats.total_documents }}</span>
-              <span class="kb-stat-label">{{ t("knowledgeBase.totalDocuments") }}</span>
-            </div>
-            <div class="kb-stat-item">
-              <span class="kb-stat-value">{{ store.stats.completed }}</span>
-              <span class="kb-stat-label">{{ t("knowledgeBase.completed") }}</span>
-            </div>
-            <div class="kb-stat-item">
-              <span class="kb-stat-value">{{ store.stats.processing }}</span>
-              <span class="kb-stat-label">{{ t("knowledgeBase.processing") }}</span>
-            </div>
-            <div class="kb-stat-item">
-              <span class="kb-stat-value">{{ store.stats.failed }}</span>
-              <span class="kb-stat-label">{{ t("knowledgeBase.failed") }}</span>
-            </div>
-            <div class="kb-stat-item">
-              <span class="kb-stat-value">{{ store.stats.orphaned }}</span>
-              <span class="kb-stat-label">{{ t("knowledgeBase.orphaned") }}</span>
-            </div>
-            <div class="kb-stat-item">
-              <span class="kb-stat-value">{{
-                store.stats.total_size < 1024 * 1024
-                  ? `${(store.stats.total_size / 1024).toFixed(1)} KB`
-                  : `${(store.stats.total_size / (1024 * 1024)).toFixed(1)} MB`
-              }}</span>
-              <span class="kb-stat-label">{{ t("knowledgeBase.totalSize") }}</span>
+        <NTabPane name="graph" :tab="t('knowledgeBase.graph')">
+          <div class="kb-graph-panel">
+            <NEmpty
+              v-if="store.entities.length === 0 && store.relationships.length === 0"
+              :description="t('knowledgeBase.noGraph')"
+            />
+            <div v-else class="kb-graph-cols">
+              <section>
+                <h3>{{ t("knowledgeBase.entities") }} ({{ store.entities.length }})</h3>
+                <ul>
+                  <li v-for="ent in store.entities" :key="ent.id">
+                    <strong>{{ ent.name }}</strong>
+                    <span v-if="ent.type"> · {{ ent.type }}</span>
+                    <p v-if="ent.description">{{ ent.description }}</p>
+                  </li>
+                </ul>
+              </section>
+              <section>
+                <h3>{{ t("knowledgeBase.relationships") }} ({{ store.relationships.length }})</h3>
+                <ul>
+                  <li v-for="rel in store.relationships" :key="rel.id">
+                    {{ rel.source }} → {{ rel.relation || "related" }} → {{ rel.target }}
+                  </li>
+                </ul>
+              </section>
             </div>
           </div>
+        </NTabPane>
+
+        <NTabPane name="jobs" :tab="t('knowledgeBase.jobs')">
+          <NEmpty v-if="jobRows.length === 0" :description="t('knowledgeBase.noJobs')" />
+          <ul v-else class="kb-job-list">
+            <li v-for="job in jobRows" :key="job.id">
+              <NTag size="small" :bordered="false">{{ job.kind }}</NTag>
+              <NTag
+                size="small"
+                :type="job.status === 'completed' || job.status === 'success' ? 'success' : job.status === 'failed' ? 'error' : 'info'"
+                :bordered="false"
+              >
+                {{ job.status }}
+              </NTag>
+              <span class="kb-job-detail">{{ job.detail }}</span>
+              <time>{{ job.created_at ? new Date(job.created_at).toLocaleString() : "" }}</time>
+            </li>
+          </ul>
         </NTabPane>
       </NTabs>
     </NSpin>
 
-    <!-- Wiki View Modal (read-only) -->
-    <NModal v-model:show="showWiki" :title="store.currentWikiPage?.title" preset="dialog" style="width: 720px">
-      <div v-if="store.currentWikiPage" class="kb-wiki-content">
-        {{ store.currentWikiPage.content }}
-      </div>
-    </NModal>
+    <KbPipelineDrawer
+      v-model:show="showDrawer"
+      :kb-id="kbId"
+      :doc="drawerDoc"
+      @changed="store.fetchStats(kbId)"
+    />
 
-    <!-- Document Preview Modal -->
-    <NModal v-model:show="showPreview" :title="previewDoc?.file_name" preset="dialog" style="width: 800px">
-      <div v-if="previewDoc" class="kb-preview">
-        <div class="kb-preview-meta">
-          <NTag size="small">{{ previewDoc.file_type }}</NTag>
-          <NTag size="small" :type="previewDoc.parse_status === 'completed' ? 'success' : 'default'">
-            {{ t(`knowledgeBase.status_${previewDoc.parse_status}`) }}
-          </NTag>
-          <span>{{ previewDoc.chunk_count }} {{ t("knowledgeBase.chunks") }}</span>
+    <NDrawer v-model:show="showWiki" :width="640" placement="right">
+      <NDrawerContent :title="store.currentWikiPage?.title" closable>
+        <div v-if="store.currentWikiPage" class="kb-wiki-drawer">
+          <NSpace>
+            <NTag size="small" :type="reviewType(store.currentWikiPage.review_status)" :bordered="false">
+              {{ store.currentWikiPage.review_status }}
+            </NTag>
+            <NButton size="tiny" @click="handleReview('approved')">{{ t("knowledgeBase.approve") }}</NButton>
+            <NButton size="tiny" @click="handleReview('rejected')">{{ t("knowledgeBase.reject") }}</NButton>
+            <NButton size="tiny" @click="handleReview('pending')">{{ t("knowledgeBase.reviewPending") }}</NButton>
+            <NButton size="tiny" @click="handleEvaluate">{{ t("knowledgeBase.evaluateQuality") }}</NButton>
+          </NSpace>
+          <div class="kb-wiki-md">
+            <MarkdownRenderer :content="store.currentWikiPage.content || ''" />
+          </div>
         </div>
-        <p v-if="previewDoc.summary_text" class="kb-preview-summary">{{ previewDoc.summary_text }}</p>
-        <p v-if="previewDoc.error_message" class="kb-preview-error">{{ previewDoc.error_message }}</p>
-      </div>
-    </NModal>
+      </NDrawerContent>
+    </NDrawer>
   </div>
 </template>
 
@@ -442,6 +725,7 @@ const searchColumns: DataTableColumns<SearchResult> = [
   align-items: center;
   gap: 16px;
   margin-bottom: 16px;
+  flex-wrap: wrap;
 }
 
 .kb-detail-title {
@@ -449,6 +733,18 @@ const searchColumns: DataTableColumns<SearchResult> = [
   font-weight: 700;
   color: $text-primary;
   margin: 0;
+}
+
+.kb-stat-chips {
+  display: flex;
+  gap: 12px;
+  font-size: 12px;
+  color: $text-muted;
+  flex: 1;
+}
+
+.kb-header-actions {
+  margin-inline-start: auto;
 }
 
 .kb-detail-layout {
@@ -496,23 +792,33 @@ const searchColumns: DataTableColumns<SearchResult> = [
   margin-bottom: 16px;
 }
 
-// ─── Search ─────────────────────────────────────────────────────────
-.kb-search-panel {
-  padding: 16px 0;
+.kb-batch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  background: $bg-secondary;
+  border-radius: $radius-sm;
+  font-size: 13px;
+  color: $text-secondary;
 }
 
-// ─── Wiki ───────────────────────────────────────────────────────────
-.kb-wiki-panel {
-  padding: 16px 0;
+.kb-pager {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
 }
 
-.kb-wiki-header {
-  margin-bottom: 16px;
+.kb-search-panel,
+.kb-wiki-panel,
+.kb-graph-panel {
+  padding: 16px 0;
 }
 
 .kb-wiki-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 16px;
 }
 
@@ -533,13 +839,6 @@ const searchColumns: DataTableColumns<SearchResult> = [
     color: $text-primary;
   }
 
-  p {
-    margin: 0 0 8px;
-    font-size: 13px;
-    color: $text-secondary;
-    line-height: 1.5;
-  }
-
   time {
     font-size: 12px;
     color: $text-muted;
@@ -548,72 +847,96 @@ const searchColumns: DataTableColumns<SearchResult> = [
 
 .kb-wiki-meta {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 8px;
 }
 
-.kb-wiki-content {
-  max-height: 60vh;
-  overflow-y: auto;
-  white-space: pre-wrap;
-  font-size: 14px;
-  color: $text-primary;
-  line-height: 1.6;
-}
-
-// ─── Stats ──────────────────────────────────────────────────────────
-.kb-stats-panel {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 16px;
-  padding: 24px 0;
-}
-
-.kb-stat-item {
-  text-align: center;
-  padding: 24px 16px;
-  border: 1px solid $border-color;
-  border-radius: $radius-sm;
-}
-
-.kb-stat-value {
-  display: block;
-  font-size: 28px;
-  font-weight: 700;
-  color: $accent-primary;
-  margin-bottom: 4px;
-}
-
-.kb-stat-label {
-  font-size: 13px;
-  color: $text-muted;
-}
-
-// ─── Preview ────────────────────────────────────────────────────────
-.kb-preview {
-  padding: 16px 0;
-}
-
-.kb-preview-meta {
+.kb-wiki-drawer {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 12px;
+  flex-direction: column;
+  gap: 16px;
 }
 
-.kb-preview-summary {
+.kb-wiki-md {
   font-size: 14px;
+  line-height: 1.65;
+  color: $text-primary;
+}
+
+.kb-graph-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+
+  h3 {
+    font-size: 14px;
+    margin: 0 0 12px;
+    color: $text-muted;
+  }
+
+  ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  li {
+    padding: 8px 0;
+    border-bottom: 1px solid $border-color;
+    font-size: 13px;
+    color: $text-secondary;
+
+    p {
+      margin: 4px 0 0;
+      color: $text-muted;
+    }
+  }
+}
+
+.kb-job-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+
+  li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 0;
+    border-bottom: 1px solid $border-color;
+    font-size: 13px;
+  }
+
+  time {
+    margin-inline-start: auto;
+    color: $text-muted;
+    font-size: 12px;
+  }
+}
+
+.kb-job-detail {
   color: $text-secondary;
-  line-height: 1.6;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.kb-preview-error {
-  font-size: 13px;
-  color: $error;
-}
+@media (max-width: 800px) {
+  .kb-detail-layout {
+    flex-direction: column;
+  }
 
-.kb-empty {
-  text-align: center;
-  padding: 48px 0;
+  .kb-sidebar {
+    width: 100%;
+    border-inline-end: none;
+    padding-inline-end: 0;
+    border-bottom: 1px solid $border-color;
+    padding-bottom: 12px;
+  }
+
+  .kb-graph-cols {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

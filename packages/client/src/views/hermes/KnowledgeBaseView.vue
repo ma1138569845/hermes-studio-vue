@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
 import { useRouter } from "vue-router";
-import { NButton, NCard, NModal, NInput, NSpace, NSpin, NTag, NPopconfirm, useMessage } from "naive-ui";
+import { NButton, NCard, NModal, NInput, NSpace, NSpin, NTag, NPopconfirm, NAlert, useMessage } from "naive-ui";
 import { useI18n } from "vue-i18n";
 import { useKnowledgeBaseStore } from "@/stores/hermes/knowledge-base";
 import type { KnowledgeBase } from "@/types/knowledge-base";
@@ -17,7 +17,9 @@ const newDescription = ref("");
 const creating = ref(false);
 
 onMounted(() => {
-  store.fetchBases();
+  store.fetchBases().catch(() => {
+    /* loadError is set by the store */
+  });
 });
 
 function openKb(kb: KnowledgeBase) {
@@ -64,6 +66,14 @@ function formatDate(iso: string): string {
     </div>
 
     <NSpin :show="store.loading">
+      <NAlert
+        v-if="store.loadError"
+        type="error"
+        :title="t('knowledgeBase.upstreamError')"
+        style="margin-bottom: 16px"
+      >
+        {{ store.loadError }}
+      </NAlert>
       <!-- System KBs -->
       <section v-if="store.systemBases.length > 0" class="kb-section">
         <h2 class="kb-section-title">{{ t("knowledgeBase.systemBases") }}</h2>
@@ -93,7 +103,7 @@ function formatDate(iso: string): string {
       <!-- User KBs -->
       <section class="kb-section">
         <h2 class="kb-section-title">{{ t("knowledgeBase.userBases") }}</h2>
-        <div v-if="store.userBases.length === 0 && !store.loading" class="kb-empty">
+        <div v-if="store.userBases.length === 0 && !store.loading && !store.loadError" class="kb-empty">
           <p>{{ t("knowledgeBase.empty") }}</p>
         </div>
         <div class="kb-grid">
