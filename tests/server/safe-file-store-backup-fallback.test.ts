@@ -40,7 +40,7 @@ describe('SafeFileStore backup fallback', () => {
     mockWriteFile.mockResolvedValue(undefined)
     mockRename.mockResolvedValue(undefined)
 
-    const { SafeFileStore } = await import('../../packages/server/src/services/safe-file-store')
+    const { SafeFileStore } = await import('../../packages/server/src/modules/studio/public/safe-file-store')
     const store = new SafeFileStore()
     const configPath = join(tmpdir(), 'config.yaml')
 
@@ -58,7 +58,7 @@ describe('SafeFileStore backup fallback', () => {
     mockCopyFile.mockRejectedValueOnce(Object.assign(new Error('permission denied'), { code: 'EACCES' }))
     mockMkdir.mockResolvedValue(undefined)
 
-    const { SafeFileStore } = await import('../../packages/server/src/services/safe-file-store')
+    const { SafeFileStore } = await import('../../packages/server/src/modules/studio/public/safe-file-store')
     const store = new SafeFileStore()
 
     await expect(store.writeText(join(tmpdir(), 'config.yaml'), 'new', { backup: true, backupPath: join(tmpdir(), 'custom.bak') })).rejects.toThrow('permission denied')

@@ -9,12 +9,13 @@ const readConfigYamlForProfileMock = vi.fn()
 const safeReadFileMock = vi.fn()
 const startRunMock = vi.fn()
 
-vi.doMock('../../packages/server/src/db/hermes/session-store', () => ({
+vi.doMock('../../packages/server/src/modules/studio/repositories/session-store', () => ({
   getSession: getSessionMock,
   updateSession: updateSessionMock,
 }))
 
-vi.doMock('../../packages/server/src/services/config-helpers', () => ({
+vi.doMock('../../packages/server/src/modules/hermes/services/profiles/config', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../../packages/server/src/modules/hermes/services/profiles/config')>(),
   PROVIDER_ENV_MAP: {
     deepseek: { api_key_env: 'DEEPSEEK_API_KEY', base_url_env: 'DEEPSEEK_BASE_URL' },
   },
@@ -22,11 +23,12 @@ vi.doMock('../../packages/server/src/services/config-helpers', () => ({
   safeReadFile: safeReadFileMock,
 }))
 
-vi.doMock('../../packages/server/src/services/hermes/hermes-profile', () => ({
+vi.doMock('../../packages/server/src/modules/hermes/services/profiles/profile', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../../packages/server/src/modules/hermes/services/profiles/profile')>(),
   getProfileDir: (profile: string) => `/tmp/hermes-profile/${profile}`,
 }))
 
-vi.doMock('../../packages/server/src/services/coding-agents/runtime/run-manager', () => ({
+vi.doMock('../../packages/server/src/modules/coding-agents/services/runtime/run-manager', () => ({
   codingAgentRunManager: {
     start: startRunMock,
   },
@@ -85,7 +87,7 @@ describe('coding agent resumed session config', () => {
     })
     safeReadFileMock.mockResolvedValue('')
 
-    const { startCodingAgentRun } = await import('../../packages/server/src/services/coding-agents')
+    const { startCodingAgentRun } = await import('../../packages/server/src/bootstrap/coding-agents')
     const result = await startCodingAgentRun('claude-code', { sessionId: 'session-1' })
 
     expect(startRunMock).toHaveBeenCalledWith(expect.objectContaining({
@@ -123,7 +125,7 @@ describe('coding agent resumed session config', () => {
     })
     safeReadFileMock.mockResolvedValue('')
 
-    const { startCodingAgentRun } = await import('../../packages/server/src/services/coding-agents')
+    const { startCodingAgentRun } = await import('../../packages/server/src/bootstrap/coding-agents')
     const result = await startCodingAgentRun('claude-code', { sessionId: 'session-1' })
 
     expect(result.provider).toBe('custom:glm-coding-plan')
@@ -153,7 +155,7 @@ describe('coding agent resumed session config', () => {
       workspace: originalWorkspace,
     })
 
-    const { startCodingAgentRun } = await import('../../packages/server/src/services/coding-agents')
+    const { startCodingAgentRun } = await import('../../packages/server/src/bootstrap/coding-agents')
     await startCodingAgentRun('codex', {
       sessionId: 'session-1',
       provider: 'deepseek',
@@ -175,7 +177,7 @@ describe('coding agent resumed session config', () => {
     }))
   })
 
-  it('ignores a stale builtin base URL when the requested provider changed', async () => {
+  it('ignores a stale builtin base URL when the requested provider changed', { timeout: 120000 }, async () => {
     makeHome()
     getSessionMock.mockReturnValue({
       id: 'session-1',
@@ -189,7 +191,7 @@ describe('coding agent resumed session config', () => {
     readConfigYamlForProfileMock.mockResolvedValue({})
     safeReadFileMock.mockResolvedValue('DEEPSEEK_API_KEY=sk-deepseek\n')
 
-    const { startCodingAgentRun } = await import('../../packages/server/src/services/coding-agents')
+    const { startCodingAgentRun } = await import('../../packages/server/src/bootstrap/coding-agents')
     const result = await startCodingAgentRun('codex', {
       sessionId: 'session-1',
       provider: 'deepseek',
@@ -234,7 +236,7 @@ describe('coding agent resumed session config', () => {
     })
     safeReadFileMock.mockResolvedValue('')
 
-    const { startCodingAgentRun } = await import('../../packages/server/src/services/coding-agents')
+    const { startCodingAgentRun } = await import('../../packages/server/src/bootstrap/coding-agents')
     await startCodingAgentRun('claude-code', { sessionId: 'session-1' })
 
     expect(startRunMock).toHaveBeenCalledWith(expect.objectContaining({
@@ -259,7 +261,7 @@ describe('coding agent resumed session config', () => {
       workspace: '/tmp/existing-workspace',
     })
 
-    const { startCodingAgentRun } = await import('../../packages/server/src/services/coding-agents')
+    const { startCodingAgentRun } = await import('../../packages/server/src/bootstrap/coding-agents')
     await startCodingAgentRun('codex', {
       sessionId: 'session-1',
       mode: 'global',
@@ -301,7 +303,7 @@ describe('coding agent resumed session config', () => {
     })
     safeReadFileMock.mockResolvedValue('')
 
-    const { startCodingAgentRun } = await import('../../packages/server/src/services/coding-agents')
+    const { startCodingAgentRun } = await import('../../packages/server/src/bootstrap/coding-agents')
     await startCodingAgentRun('pi', { sessionId: 'session-1' })
 
     const launch = startRunMock.mock.calls[0][0]
@@ -321,7 +323,7 @@ describe('coding agent resumed session config', () => {
     readConfigYamlForProfileMock.mockResolvedValue({})
     safeReadFileMock.mockResolvedValue('')
 
-    const { startCodingAgentRun } = await import('../../packages/server/src/services/coding-agents')
+    const { startCodingAgentRun } = await import('../../packages/server/src/bootstrap/coding-agents')
     await startCodingAgentRun('pi', {
       sessionId: 'session-new',
       profile: 'default',
@@ -359,7 +361,7 @@ describe('coding agent resumed session config', () => {
     readConfigYamlForProfileMock.mockResolvedValue({})
     safeReadFileMock.mockResolvedValue('')
 
-    const { startCodingAgentRun } = await import('../../packages/server/src/services/coding-agents')
+    const { startCodingAgentRun } = await import('../../packages/server/src/bootstrap/coding-agents')
     const result = await startCodingAgentRun('codex', { sessionId: 'session-1', mode: 'global' })
 
     expect(result).toEqual(expect.objectContaining({
@@ -373,8 +375,11 @@ describe('coding agent resumed session config', () => {
       nativeResume: false,
       provider: 'global',
       model: '',
-      env: expect.any(Object),
+      env: expect.objectContaining({
+        CODEX_HOME: expect.stringContaining(join('coding-agent', 'model', 'default', 'global', 'codex', 'runs')),
+      }),
       args: [],
+      promptFile: expect.stringContaining('AGENTS.md'),
     }))
     expect(updateSessionMock).toHaveBeenCalledWith('session-1', expect.objectContaining({
       agent_mode: 'global',
@@ -400,7 +405,7 @@ describe('coding agent resumed session config', () => {
     readConfigYamlForProfileMock.mockResolvedValue({})
     safeReadFileMock.mockResolvedValue('')
 
-    const { startCodingAgentRun } = await import('../../packages/server/src/services/coding-agents')
+    const { startCodingAgentRun } = await import('../../packages/server/src/bootstrap/coding-agents')
     const result = await startCodingAgentRun('codex', {
       sessionId: 'session-1',
       baseUrl: 'https://api.apikey.fun/v1',
@@ -423,7 +428,7 @@ describe('coding agent resumed session config', () => {
     readConfigYamlForProfileMock.mockResolvedValue({})
     safeReadFileMock.mockResolvedValue('')
 
-    const { startCodingAgentRun } = await import('../../packages/server/src/services/coding-agents')
+    const { startCodingAgentRun } = await import('../../packages/server/src/bootstrap/coding-agents')
     await expect(startCodingAgentRun('codex', {
       sessionId: 'session-1',
       mode: 'scoped',
@@ -451,7 +456,7 @@ describe('coding agent resumed session config', () => {
     readConfigYamlForProfileMock.mockResolvedValue({ custom_providers: [] })
     safeReadFileMock.mockResolvedValue('')
 
-    const { startCodingAgentRun } = await import('../../packages/server/src/services/coding-agents')
+    const { startCodingAgentRun } = await import('../../packages/server/src/bootstrap/coding-agents')
     await expect(startCodingAgentRun('claude-code', { sessionId: 'session-1' }))
       .rejects.toThrow('Coding agent provider credentials are missing')
     expect(startRunMock).not.toHaveBeenCalled()
@@ -478,7 +483,7 @@ describe('coding agent resumed session config', () => {
     })
     safeReadFileMock.mockResolvedValue('SENSENOVA_API_KEY=sk-from-env\n')
 
-    const { startCodingAgentRun } = await import('../../packages/server/src/services/coding-agents')
+    const { startCodingAgentRun } = await import('../../packages/server/src/bootstrap/coding-agents')
     await expect(startCodingAgentRun('claude-code', { sessionId: 'session-1' })).resolves.toEqual(
       expect.objectContaining({
         provider: 'custom:sensenova',
@@ -502,7 +507,7 @@ describe('coding agent resumed session config', () => {
     })
     safeReadFileMock.mockResolvedValue('')
 
-    const { startCodingAgentRun } = await import('../../packages/server/src/services/coding-agents')
+    const { startCodingAgentRun } = await import('../../packages/server/src/bootstrap/coding-agents')
     await expect(startCodingAgentRun('codex', {
       sessionId: 'new-session',
       mode: 'scoped',

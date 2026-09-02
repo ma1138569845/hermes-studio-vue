@@ -4,9 +4,9 @@ import { useChatStore } from '@/stores/hermes/chat'
 import { useAppStore } from '@/stores/hermes/app'
 import { useProfilesStore } from '@/stores/hermes/profiles'
 import { useSettingsStore } from '@/stores/hermes/settings'
-import { fetchContextLength } from '@/api/hermes/sessions'
+import { fetchContextLength } from '@/api/studio/sessions'
 import { setModelContext } from '@/api/hermes/model-context'
-import { fetchSocialMessagePlatforms } from '@/api/social-messages'
+import { fetchSocialMessagePlatforms } from '@/api/studio/social-messages'
 import { fetchSkills, type SkillCategory, type SkillInfo } from '@/api/hermes/skills'
 import { deleteSkillBundleApi, fetchSkillBundles, type SkillBundleInfo } from '@/api/hermes/skill-bundles'
 import { NButton, NTooltip, NModal, NInputNumber, NPopover, NSlider, NDropdown, useDialog, useMessage, type DropdownOption } from 'naive-ui'
@@ -33,9 +33,13 @@ const { toolTraceVisible, toggleToolTraceVisible } = useToolTraceVisibility()
 const props = withDefaults(defineProps<{
   modelLabel?: string
   modelDisabled?: boolean
+  initialText?: string
+  persistDraft?: boolean
 }>(), {
   modelLabel: '',
   modelDisabled: false,
+  initialText: '',
+  persistDraft: true,
 })
 
 const emit = defineEmits<{
@@ -236,6 +240,7 @@ const isCodingAgentSession = computed(() => {
     || session.agent === 'codex'
     || session.agent === 'claude-code'
     || session.agent === 'pi'
+    || session.agent === 'grok'
   )
 })
 const isForkCommandSession = computed(() => !!chatStore.activeSession && chatStore.activeSession.source !== 'coding_agent')
@@ -511,11 +516,13 @@ function saveDraftForActiveSession(value: string) {
 
 // 从 localStorage 读取设置
 onMounted(() => {
-  loadDraftForActiveSession()
+  if (props.initialText) inputText.value = props.initialText
+  else if (props.persistDraft) loadDraftForActiveSession()
   syncViewport()
   window.addEventListener('resize', syncViewport)
   nextTick(() => {
     applyConfiguredTextareaHeight()
+    if (props.initialText) focusComposer()
   })
 })
 
@@ -554,11 +561,12 @@ async function handleInputSettingsSelect(key: string | number) {
 }
 
 watch(inputText, (value) => {
-  saveDraftForActiveSession(value)
+  if (props.persistDraft) saveDraftForActiveSession(value)
 })
 
 watch(() => chatStore.activeSession?.id, () => {
-  loadDraftForActiveSession()
+  if (props.persistDraft) loadDraftForActiveSession()
+  else inputText.value = props.initialText
   nextTick(() => {
     applyConfiguredTextareaHeight()
   })

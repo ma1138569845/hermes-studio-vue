@@ -49,7 +49,7 @@ describe.skipIf(process.platform === 'win32')('Hermes plugin discovery environme
     process.env.HERMES_BIN = fakeHermes
     process.env.CAPTURE_FILE = captureFile
 
-    const { listHermesPlugins } = await import('../../packages/server/src/services/hermes/plugins')
+    const { listHermesPlugins } = await import('../../packages/server/src/modules/hermes/services/plugins/plugins')
     await expect(listHermesPlugins()).resolves.toMatchObject({ plugins: [] })
 
     const [command, firstArg, secondArg, resolvedRoot] = readFileSync(captureFile, 'utf8').trim().split('\n')
@@ -87,7 +87,7 @@ describe.skipIf(process.platform === 'win32')('Hermes plugin discovery environme
     process.env.PYTHONPATH = join(tempDir, 'shadow-path')
     process.env.PYTHONHOME = join(tempDir, 'shadow-home')
 
-    const { listHermesPlugins } = await import('../../packages/server/src/services/hermes/plugins')
+    const { listHermesPlugins } = await import('../../packages/server/src/modules/hermes/services/plugins/plugins')
     await expect(listHermesPlugins()).resolves.toMatchObject({ plugins: [] })
 
     const [command, firstArg, pythonPath, pythonHome] = readFileSync(captureFile, 'utf8').trim().split('\n')

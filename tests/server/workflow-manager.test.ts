@@ -28,24 +28,33 @@ const workflowSkillResolverMock = vi.hoisted(() => ({
   resolve: null as null | ((args: { agent?: string; profile: string; skillName: string }) => Promise<any>),
 }))
 
-vi.mock('../../packages/server/src/services/workflow-skill-resolver', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../packages/server/src/services/workflow-skill-resolver')>()
+vi.mock('../../packages/server/src/modules/studio/services/workflow/skill-resolver', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../packages/server/src/modules/studio/services/workflow/skill-resolver')>()
   return {
     ...actual,
     resolveWorkflowSkillContent: (args: { agent?: string; profile: string; skillName: string }) => (
       workflowSkillResolverMock.resolve
         ? workflowSkillResolverMock.resolve(args)
-        : actual.resolveWorkflowSkillContent(args)
+        : Promise.resolve(null)
     ),
   }
 })
 
-vi.mock('../../packages/server/src/routes/hermes/chat-run', () => ({
-  getChatRunServer: () => chatRunMock,
+vi.mock('../../packages/server/src/modules/studio/public/workflow-runtime', () => ({
+  isWorkflowRunCoordinatorAvailable: () => true,
+  runWorkflowAndWait: (input: Record<string, unknown>, options: Record<string, unknown>) => chatRunMock.runAndWait(input, options),
+  abortWorkflowSession: (sessionId: string, reason: string) => chatRunMock.abortSession(sessionId, reason),
+  stopWorkflowAgentRun: vi.fn(),
+  deleteWorkflowPrimaryAgentSession: vi.fn(async () => true),
+  getWorkflowAvailableModelGroups: vi.fn(async () => []),
 }))
 
-vi.mock('../../packages/server/src/db/hermes/session-store', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../packages/server/src/db/hermes/session-store')>()
+vi.mock('../../packages/server/src/modules/studio/services/agent-availability', () => ({
+  assertAgentAvailable: vi.fn(),
+}))
+
+vi.mock('../../packages/server/src/modules/studio/repositories/session-store', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../packages/server/src/modules/studio/repositories/session-store')>()
   return {
     ...actual,
     getSession: vi.fn(() => null),
@@ -57,7 +66,7 @@ vi.mock('../../packages/server/src/db/hermes/session-store', async (importOrigin
 })
 
 afterAll(async () => {
-  const { closeDb } = await import('../../packages/server/src/db/index')
+  const { closeDb } = await import('../../packages/server/src/modules/studio/infrastructure/database/index')
   closeDb()
   restoreEnvironmentVariable('HERMES_WEB_UI_TEST_DB_DIR', originalWorkflowManagerTestDbDir)
   restoreEnvironmentVariable('HERMES_WEB_UI_HOME', originalWorkflowManagerWebUiHome)
@@ -67,10 +76,10 @@ afterAll(async () => {
 
 describe('workflow manager', () => {
   it('isolates both SQLite and default workflow workspaces for this suite', async () => {
-    const { config } = await import('../../packages/server/src/config')
-    const { getStoragePath } = await import('../../packages/server/src/db/index')
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { createWorkflow, deleteWorkflow } = await import('../../packages/server/src/db/hermes/workflow-store')
+    const { config } = await import('../../packages/server/src/modules/studio/public/config')
+    const { getStoragePath } = await import('../../packages/server/src/modules/studio/infrastructure/database/index')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { createWorkflow, deleteWorkflow } = await import('../../packages/server/src/modules/studio/repositories/workflow-store')
 
     expect(getStoragePath()).toBe(join(workflowManagerTestDbDir, 'hermes-web-ui.db'))
     expect(config.appHome).toBe(workflowManagerTestHome)
@@ -86,8 +95,7 @@ describe('workflow manager', () => {
   })
 
   it('returns a server-wide singleton instance', { timeout: 30_000 }, async () => {
-    const { WorkflowManager, getWorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
-
+    const { WorkflowManager, getWorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     const first = getWorkflowManager()
     const second = getWorkflowManager()
 
@@ -96,7 +104,7 @@ describe('workflow manager', () => {
   })
 
   it('stores and emits workflow runtime status updates', async () => {
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     const manager = new WorkflowManager()
     const updates: unknown[] = []
     const dispose = manager.onRuntimeStatus(status => updates.push(status))
@@ -125,7 +133,7 @@ describe('workflow manager', () => {
   })
 
   it('maps workflow node agents to the existing run backends', async () => {
-    const { resolveWorkflowNodeRunTarget } = await import('../../packages/server/src/services/workflow-manager')
+    const { resolveWorkflowNodeRunTarget } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
 
     expect(resolveWorkflowNodeRunTarget('hermes')).toEqual({
       type: 'workflow',
@@ -161,7 +169,7 @@ describe('workflow manager', () => {
   })
 
   it('requires workflow node approval only when explicitly enabled', async () => {
-    const { workflowNodeRequiresApproval } = await import('../../packages/server/src/services/workflow-manager')
+    const { workflowNodeRequiresApproval } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
 
     expect(workflowNodeRequiresApproval({ data: { approvalRequired: true } })).toBe(true)
     expect(workflowNodeRequiresApproval({ data: { approvalRequired: false } })).toBe(false)
@@ -169,7 +177,7 @@ describe('workflow manager', () => {
   })
 
   it('rejects unsupported node types and agent runtimes instead of silently falling back to Hermes', async () => {
-    const { normalizeWorkflowNode } = await import('../../packages/server/src/services/workflow-manager')
+    const { normalizeWorkflowNode } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     expect(() => normalizeWorkflowNode({ id: 'shell', type: 'shell', data: { agent: 'hermes' } })).toThrow('workflow node shell must be an Agent node')
     expect(() => normalizeWorkflowNode({ id: 'unknown', type: 'agent', data: { agent: 'python' } })).toThrow('workflow node unknown has unsupported agent runtime')
     expect(normalizeWorkflowNode({ id: 'hermes', type: 'agent', data: { agent: 'hermes' } })?.data.agent).toBe('hermes')
@@ -177,10 +185,14 @@ describe('workflow manager', () => {
     expect(normalizeWorkflowNode({ id: 'claude', type: 'agent', data: { agent: 'claude-code' } })?.data.agent).toBe('claude-code')
     expect(normalizeWorkflowNode({ id: 'codex', type: 'agent', data: { agent: 'codex' } })?.data.agent).toBe('codex')
     expect(normalizeWorkflowNode({ id: 'pi', type: 'agent', data: { agent: 'pi' } })?.data.agent).toBe('pi')
+    expect(normalizeWorkflowNode({ id: 'legacy-mode', type: 'agent', data: { agent: 'codex' } })?.data.agentMode).toBe('scoped')
+    expect(normalizeWorkflowNode({ id: 'global-mode', type: 'agent', data: { agent: 'codex', agentMode: 'global' } })?.data.agentMode).toBe('global')
+    expect(() => normalizeWorkflowNode({ id: 'bad-global', type: 'agent', data: { agent: 'ekko-agent', agentMode: 'global' } }))
+      .toThrow('workflow node bad-global cannot use global mode')
   })
 
   it('normalizes workflow node join mode and rejects malformed explicit values', async () => {
-    const { normalizeWorkflowNode } = await import('../../packages/server/src/services/workflow-manager')
+    const { normalizeWorkflowNode } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     expect(normalizeWorkflowNode({ id: 'legacy', type: 'agent', data: {} })?.data.orchestration).toEqual({ join: 'all' })
     expect(normalizeWorkflowNode({ id: 'any', type: 'agent', data: { orchestration: { join: 'any' } } })?.data.orchestration).toEqual({ join: 'any' })
     expect(normalizeWorkflowNode({ id: 'positioned', type: 'agent', position: { x: -240, y: 360 }, data: {} })?.position).toEqual({ x: -240, y: 360 })
@@ -188,7 +200,7 @@ describe('workflow manager', () => {
   })
 
   it('ignores removed legacy execution-policy fields while preserving the upstream execution identity', async () => {
-    const { normalizeWorkflowNode } = await import('../../packages/server/src/services/workflow-manager')
+    const { normalizeWorkflowNode } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     const normalized = normalizeWorkflowNode({ id: 'legacy-policy', type: 'agent', data: {
       agent: 'hermes', provider: 'custom:test', model: 'model-a', apiMode: 'chat_completions',
       reasoningEffort: 'high', executionPolicy: {
@@ -205,9 +217,9 @@ describe('workflow manager', () => {
   })
 
   it('strips removed legacy execution-policy fields from embedded edge node copies at every persistence boundary', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { createWorkflow, getWorkflow } = await import('../../packages/server/src/db/hermes/workflow-store')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { createWorkflow, getWorkflow } = await import('../../packages/server/src/modules/studio/repositories/workflow-store')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const manager = new WorkflowManager()
     const legacyPolicy = { allowedToolsets: [], allowedTools: ['terminal'], skipMemory: true, skipContextFiles: true }
@@ -244,8 +256,8 @@ describe('workflow manager', () => {
   })
 
   it('freezes the selected target but leaves Hermes api mode owned by its provider profile', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     chatRunMock.runAndWait.mockReset().mockResolvedValue({ ok: true, output: 'done' })
     const manager = new WorkflowManager()
@@ -276,8 +288,8 @@ describe('workflow manager', () => {
   })
 
   it('preserves authored visual graph fields in an immutable run snapshot', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     chatRunMock.sessionOutputs.clear()
     chatRunMock.runAndWait.mockReset().mockImplementation(async (request: { session_id: string }) => {
@@ -331,8 +343,8 @@ describe('workflow manager', () => {
   })
 
   it.each(['codex', 'pi'] as const)('continues forwarding api mode for %s workflow nodes', async (agent) => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     chatRunMock.runAndWait.mockReset().mockResolvedValue({ ok: true, output: 'done' })
     const manager = new WorkflowManager()
@@ -354,10 +366,58 @@ describe('workflow manager', () => {
     } finally { await manager.delete(workflow.id) }
   })
 
+  it('runs global Codex workflow nodes without injecting scoped model configuration', async () => {
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { getDb } = await import('../../packages/server/src/modules/studio/infrastructure/database/index')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
+    initAllStores()
+    chatRunMock.runAndWait.mockReset().mockResolvedValue({ ok: true, output: 'done' })
+    const manager = new WorkflowManager()
+    const workflow = manager.create({
+      name: `Global Codex execution ${Date.now()}`,
+      profile: 'default',
+      nodes: [{ id: 'agent', type: 'agent', data: {
+        title: 'Global Codex', agent: 'codex', agentMode: 'global',
+        provider: 'must-not-leak', model: 'must-not-leak', apiMode: 'chat_completions',
+        reasoningEffort: 'high', input: 'work',
+      } }],
+      edges: [],
+    })
+    try {
+      const result = await manager.runNow(workflow.id)
+      const runInput = chatRunMock.runAndWait.mock.calls[0]?.[0]
+      expect(runInput).toMatchObject({
+        coding_agent_id: 'codex',
+        agent_id: 'codex',
+        mode: 'global',
+        profile: 'default',
+        one_shot_model: true,
+      })
+      expect(runInput).not.toHaveProperty('provider')
+      expect(runInput).not.toHaveProperty('model')
+      expect(runInput).not.toHaveProperty('apiMode')
+      expect(runInput).not.toHaveProperty('reasoning_effort')
+      expect(result.nodeSessions[0]).toMatchObject({
+        agent: 'codex',
+        agent_mode: 'global',
+        status: 'completed',
+      })
+      expect(getDb()!.prepare(`SELECT source, agent, agent_mode, provider, model, api_mode FROM sessions WHERE id = ?`)
+        .get(result.nodeSessions[0]!.session_id)).toEqual({
+          source: 'workflow',
+          agent: 'codex',
+          agent_mode: 'global',
+          provider: 'global',
+          model: '',
+          api_mode: '',
+        })
+    } finally { await manager.delete(workflow.id) }
+  })
+
   it('runs Ekko workflow nodes as scoped one-shot executions without background delegation', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { getDb } = await import('../../packages/server/src/db')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { getDb } = await import('../../packages/server/src/modules/studio/infrastructure/database/index')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     chatRunMock.runAndWait.mockReset().mockResolvedValue({ ok: true, output: 'done' })
     const manager = new WorkflowManager()
@@ -402,8 +462,8 @@ describe('workflow manager', () => {
   })
 
   it('forwards workflow images to coding-agent nodes as ContentBlock input', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     chatRunMock.runAndWait.mockReset().mockResolvedValue({ ok: true, output: 'done' })
     const manager = new WorkflowManager()
@@ -435,8 +495,8 @@ describe('workflow manager', () => {
   })
 
   it('forwards workflow files as file ContentBlocks instead of mislabeled images', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     chatRunMock.runAndWait.mockReset().mockResolvedValue({ ok: true, output: 'done' })
     const manager = new WorkflowManager()
@@ -468,9 +528,9 @@ describe('workflow manager', () => {
   })
 
   it('rejects unsupported execution tuples before persisting a run', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { listWorkflowRuns } = await import('../../packages/server/src/db/hermes/workflow-run-store')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { listWorkflowRuns } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     chatRunMock.runAndWait.mockReset()
     const manager = new WorkflowManager()
@@ -490,9 +550,9 @@ describe('workflow manager', () => {
   })
 
   it('defers portable skill validation until runNow and fails closed before persisting a run', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { listWorkflowRuns } = await import('../../packages/server/src/db/hermes/workflow-run-store')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { listWorkflowRuns } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     chatRunMock.runAndWait.mockReset()
     const manager = new WorkflowManager()
@@ -516,7 +576,7 @@ describe('workflow manager', () => {
   })
 
   it('distinguishes pending, ready, and skipped joins without treating unresolved edges as not taken', async () => {
-    const { evaluateWorkflowNodeJoin } = await import('../../packages/server/src/services/workflow-manager')
+    const { evaluateWorkflowNodeJoin } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     const taken = { status: 'taken', routeMatched: true } as const
     const notTaken = { status: 'not_taken', routeMatched: false, reason: 'route_not_matched' } as const
 
@@ -530,7 +590,7 @@ describe('workflow manager', () => {
   })
 
   it('normalizes legacy and declarative workflow edges without changing legacy semantics', async () => {
-    const { normalizeWorkflowEdge } = await import('../../packages/server/src/services/workflow-manager')
+    const { normalizeWorkflowEdge } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
 
     expect(normalizeWorkflowEdge({ id: 'legacy', source: 'first', target: 'second' })).toEqual({
       id: 'legacy', source: 'first', target: 'second', orchestration: { route: 'success' },
@@ -541,7 +601,7 @@ describe('workflow manager', () => {
   })
 
   it('normalizes bounded feedback edges with a default of three iterations', async () => {
-    const { normalizeWorkflowEdge, MAX_WORKFLOW_LOOP_ITERATIONS } = await import('../../packages/server/src/services/workflow-manager')
+    const { normalizeWorkflowEdge, MAX_WORKFLOW_LOOP_ITERATIONS } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     expect(normalizeWorkflowEdge({
       id: 'feedback-default', source: 'review', target: 'implement',
       data: { orchestration: { route: 'success', feedback: true } },
@@ -554,7 +614,7 @@ describe('workflow manager', () => {
   })
 
   it('rejects unbounded or malformed feedback iteration limits', async () => {
-    const { normalizeWorkflowEdge, MAX_WORKFLOW_LOOP_ITERATIONS } = await import('../../packages/server/src/services/workflow-manager')
+    const { normalizeWorkflowEdge, MAX_WORKFLOW_LOOP_ITERATIONS } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     for (const maxIterations of [0, -1, 1.5, '3', MAX_WORKFLOW_LOOP_ITERATIONS + 1]) {
       expect(() => normalizeWorkflowEdge({
         id: `feedback-${maxIterations}`, source: 'review', target: 'implement',
@@ -568,7 +628,7 @@ describe('workflow manager', () => {
   })
 
   it('rejects malformed explicit workflow edge orchestration instead of falling back to legacy routing', async () => {
-    const { normalizeWorkflowEdge } = await import('../../packages/server/src/services/workflow-manager')
+    const { normalizeWorkflowEdge } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     expect(() => normalizeWorkflowEdge({ id: 'invalid-route', source: 'first', target: 'second', data: { orchestration: { route: 'sometimes' } } })).toThrow('workflow edge invalid-route has invalid orchestration route')
     expect(() => normalizeWorkflowEdge({ id: 'missing-value', source: 'first', target: 'second', data: { orchestration: { route: 'success', condition: { path: 'output.status', operator: 'equals' } } } })).toThrow('workflow edge missing-value condition operator equals requires value')
     expect(() => normalizeWorkflowEdge({ id: 'dangerous-path', source: 'first', target: 'second', data: { orchestration: { route: 'success', condition: { path: 'output.__proto__.polluted', operator: 'exists' } } } })).toThrow('invalid condition path')
@@ -576,7 +636,7 @@ describe('workflow manager', () => {
   })
 
   it('compiles a bounded single-entry natural loop from an explicit feedback edge', async () => {
-    const { compileWorkflowLoops, normalizeWorkflowEdge } = await import('../../packages/server/src/services/workflow-manager')
+    const { compileWorkflowLoops, normalizeWorkflowEdge } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     const nodes = ['entry', 'implement', 'review', 'exit']
     const edges = [
       normalizeWorkflowEdge({ id: 'entry-implement', source: 'entry', target: 'implement' })!,
@@ -591,7 +651,7 @@ describe('workflow manager', () => {
   })
 
   it('compiles a one-node feedback connection as a bounded self loop', async () => {
-    const { compileWorkflowLoops, normalizeWorkflowEdge } = await import('../../packages/server/src/services/workflow-manager')
+    const { compileWorkflowLoops, normalizeWorkflowEdge } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     const feedback = normalizeWorkflowEdge({
       id: 'review-review', source: 'review', target: 'review',
       sourceHandle: 'output', targetHandle: 'top',
@@ -606,7 +666,7 @@ describe('workflow manager', () => {
   })
 
   it('rejects ordinary cycles and feedback edges without a forward path', async () => {
-    const { compileWorkflowLoops, normalizeWorkflowEdge } = await import('../../packages/server/src/services/workflow-manager')
+    const { compileWorkflowLoops, normalizeWorkflowEdge } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     const edge = (id: string, source: string, target: string, feedback = false) => normalizeWorkflowEdge({
       id, source, target, data: feedback ? { orchestration: { route: 'success', feedback: true } } : undefined,
     })!
@@ -620,7 +680,7 @@ describe('workflow manager', () => {
   })
 
   it('assigns the nearest unique parent for laminar nested loops and allows disjoint loops', async () => {
-    const { compileWorkflowLoops, normalizeWorkflowEdge } = await import('../../packages/server/src/services/workflow-manager')
+    const { compileWorkflowLoops, normalizeWorkflowEdge } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     const edge = (id: string, source: string, target: string, feedback = false) => normalizeWorkflowEdge({
       id, source, target, data: feedback ? { orchestration: { route: 'success', feedback: true } } : undefined,
     })!
@@ -640,7 +700,7 @@ describe('workflow manager', () => {
   })
 
   it('rejects partially overlapping loop bodies that are not laminar', async () => {
-    const { validateLaminarWorkflowLoops } = await import('../../packages/server/src/services/workflow-manager')
+    const { validateLaminarWorkflowLoops } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     expect(() => validateLaminarWorkflowLoops([
       { id: 'loop:left', bodyNodeIds: ['a', 'shared'], parentLoopId: null },
       { id: 'loop:right', bodyNodeIds: ['shared', 'b'], parentLoopId: null },
@@ -652,7 +712,7 @@ describe('workflow manager', () => {
   })
 
   it('evaluates equals conditions through own properties only', async () => {
-    const { evaluateWorkflowEdgeCondition } = await import('../../packages/server/src/services/workflow-manager')
+    const { evaluateWorkflowEdgeCondition } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
 
     expect(evaluateWorkflowEdgeCondition(
       { path: 'output.status', operator: 'equals', value: 'RETRY' },
@@ -671,7 +731,7 @@ describe('workflow manager', () => {
   })
 
   it('evaluates the supported declarative condition operators without coercing missing operands', async () => {
-    const { evaluateWorkflowEdgeCondition } = await import('../../packages/server/src/services/workflow-manager')
+    const { evaluateWorkflowEdgeCondition } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     const evaluate = (operator: string, actual: unknown, value?: unknown) => evaluateWorkflowEdgeCondition(
       value === undefined
         ? { path: 'output.value', operator }
@@ -702,7 +762,7 @@ describe('workflow manager', () => {
   })
 
   it('evaluates edge routes before conditions and returns auditable decisions', async () => {
-    const { evaluateWorkflowEdgeRoute } = await import('../../packages/server/src/services/workflow-manager')
+    const { evaluateWorkflowEdgeRoute } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     const context = { output: { status: 'PASS' } }
     const condition = { path: 'output.status', operator: 'equals', value: 'PASS' } as const
 
@@ -714,7 +774,7 @@ describe('workflow manager', () => {
   })
 
   it('parses unambiguous structured assistant output without depending on JSON whitespace', async () => {
-    const { parseWorkflowStructuredOutput } = await import('../../packages/server/src/services/workflow-manager')
+    const { parseWorkflowStructuredOutput } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     const expected = { decision: 'RELEASED', route_token: 'HSR_RELEASED_OK' }
 
     expect(parseWorkflowStructuredOutput(JSON.stringify(expected))).toEqual(expected)
@@ -727,7 +787,7 @@ describe('workflow manager', () => {
   })
 
   it('rejects dangerous condition paths before evaluation', async () => {
-    const { evaluateWorkflowEdgeCondition } = await import('../../packages/server/src/services/workflow-manager')
+    const { evaluateWorkflowEdgeCondition } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
 
     for (const path of ['output.__proto__.polluted', 'output.prototype.value', 'output.constructor.name']) {
       expect(() => evaluateWorkflowEdgeCondition(
@@ -738,9 +798,9 @@ describe('workflow manager', () => {
   })
 
   it('rejects invalid workflow graphs before creating a run or starting an agent', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { listWorkflowRuns } = await import('../../packages/server/src/db/hermes/workflow-run-store')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { listWorkflowRuns } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const manager = new WorkflowManager()
     chatRunMock.runAndWait.mockReset()
@@ -763,7 +823,7 @@ describe('workflow manager', () => {
   })
 
   it('rejects duplicate graph identities and invalid explicit start nodes during preflight', async () => {
-    const { compileWorkflowGraphPreflight } = await import('../../packages/server/src/services/workflow-manager')
+    const { compileWorkflowGraphPreflight } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     const node = (id: string) => ({ id, type: 'agent', data: { title: id, agent: 'hermes' } })
     expect(() => compileWorkflowGraphPreflight([node('a'), node('a')], [])).toThrow('workflow has duplicate node id: a')
     expect(() => compileWorkflowGraphPreflight([node('a'), node('b')], [
@@ -776,7 +836,7 @@ describe('workflow manager', () => {
   })
 
   it('calculates static execution bounds for disjoint and nested loop membership', async () => {
-    const { calculateWorkflowStaticExecutionBound } = await import('../../packages/server/src/services/workflow-manager')
+    const { calculateWorkflowStaticExecutionBound } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     const loop = (id: string, bodyNodeIds: string[], maxIterations: number) => ({ id, bodyNodeIds, maxIterations }) as any
     expect(calculateWorkflowStaticExecutionBound(['plain'], [])).toBe(1)
     expect(calculateWorkflowStaticExecutionBound(['a', 'b', 'plain'], [
@@ -788,8 +848,8 @@ describe('workflow manager', () => {
   })
 
   it('passes only the remaining run deadline to each loop execution', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const manager = new WorkflowManager()
     let now = 1000
@@ -831,8 +891,8 @@ describe('workflow manager', () => {
   })
 
   it('bounds skill assembly by the same absolute Run deadline', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const manager = new WorkflowManager()
     chatRunMock.runAndWait.mockReset()
@@ -864,9 +924,9 @@ describe('workflow manager', () => {
   })
 
   it('fails closed when run-deadline loop epoch evidence cannot be persisted', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { getDb } = await import('../../packages/server/src/db')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { getDb } = await import('../../packages/server/src/modules/studio/infrastructure/database/index')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const db = getDb()!
     db.exec(`CREATE TRIGGER fail_deadline_loop_epoch BEFORE INSERT ON workflow_run_loop_epochs
@@ -898,9 +958,9 @@ describe('workflow manager', () => {
   })
 
   it('rejects a loop whose static execution bound exceeds the server run budget before persistence', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { listWorkflowRuns } = await import('../../packages/server/src/db/hermes/workflow-run-store')
-    const { MAX_WORKFLOW_RUN_EXECUTIONS, WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { listWorkflowRuns } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
+    const { MAX_WORKFLOW_RUN_EXECUTIONS, WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     expect(MAX_WORKFLOW_RUN_EXECUTIONS).toBe(1000)
     const manager = new WorkflowManager()
@@ -919,8 +979,8 @@ describe('workflow manager', () => {
   })
 
   it('executes a bounded top-level feedback loop with distinct iteration identities', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const manager = new WorkflowManager()
     chatRunMock.runAndWait.mockReset()
@@ -948,7 +1008,7 @@ describe('workflow manager', () => {
         ['header', 'header@loop:retry:2', [{ loopId: 'loop:retry', iteration: 2 }]],
         ['latch', 'latch@loop:retry:2', [{ loopId: 'loop:retry', iteration: 2 }]],
       ])
-      const { listWorkflowRunEdgeEvaluations } = await import('../../packages/server/src/db/hermes/workflow-run-store')
+      const { listWorkflowRunEdgeEvaluations } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
       expect(listWorkflowRunEdgeEvaluations(result.run.id).filter(item => item.edge_id === 'retry').map(item => ({
         status: item.status, reason: item.reason, sourceExecutionId: item.source_execution_id, iterationPath: item.iteration_path,
       }))).toEqual([
@@ -963,7 +1023,7 @@ describe('workflow manager', () => {
         { status: 'taken', sourceExecutionId: 'header@loop:retry:1', iterationPath: [{ loopId: 'loop:retry', iteration: 1 }] },
         { status: 'taken', sourceExecutionId: 'header@loop:retry:2', iterationPath: [{ loopId: 'loop:retry', iteration: 2 }] },
       ])
-      const { listWorkflowRunLoopEpochs } = await import('../../packages/server/src/db/hermes/workflow-run-store')
+      const { listWorkflowRunLoopEpochs } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
       expect(listWorkflowRunLoopEpochs(result.run.id).map(epoch => ({
         loopId: epoch.loop_id, iteration: epoch.iteration, path: epoch.iteration_path,
         status: epoch.status, exitReason: epoch.exit_reason,
@@ -976,8 +1036,8 @@ describe('workflow manager', () => {
   })
 
   it('executes two disjoint bounded loops with independent canonical iteration paths', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const manager = new WorkflowManager()
     chatRunMock.runAndWait.mockReset().mockResolvedValue({ ok: true, output: 'continue' })
@@ -1014,8 +1074,8 @@ describe('workflow manager', () => {
   })
 
   it('executes a strictly nested loop inner-first with canonical nested iteration paths', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const manager = new WorkflowManager()
     chatRunMock.runAndWait.mockReset().mockResolvedValue({ ok: true, output: 'continue' })
@@ -1056,8 +1116,8 @@ describe('workflow manager', () => {
   })
 
   it('executes arbitrary-depth nested loops inside a broader DAG with canonical paths', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const manager = new WorkflowManager()
     chatRunMock.runAndWait.mockReset().mockResolvedValue({ ok: true, output: 'continue' })
@@ -1098,9 +1158,9 @@ describe('workflow manager', () => {
   })
 
   it('skips an unmatched conditional node inside a loop iteration without creating a session', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { listWorkflowRunEdgeEvaluations } = await import('../../packages/server/src/db/hermes/workflow-run-store')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { listWorkflowRunEdgeEvaluations } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const manager = new WorkflowManager()
     chatRunMock.runAndWait.mockReset().mockImplementation(async (request: { session_id: string; input: string }) => {
@@ -1137,9 +1197,9 @@ describe('workflow manager', () => {
   })
 
   it('retries an iteration when an earlier loop node fails and the failure feedback source is skipped', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { listWorkflowRunEdgeEvaluations } = await import('../../packages/server/src/db/hermes/workflow-run-store')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { listWorkflowRunEdgeEvaluations } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const manager = new WorkflowManager()
     chatRunMock.runAndWait.mockReset()
@@ -1171,9 +1231,9 @@ describe('workflow manager', () => {
   })
 
   it.each(['failure', 'always'] as const)('retries a failed loop iteration through a %s feedback route and completes after recovery', async (route) => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { listWorkflowRunEdgeEvaluations, listWorkflowRunLoopEpochs } = await import('../../packages/server/src/db/hermes/workflow-run-store')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { listWorkflowRunEdgeEvaluations, listWorkflowRunLoopEpochs } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const manager = new WorkflowManager()
     chatRunMock.runAndWait.mockReset()
@@ -1215,9 +1275,9 @@ describe('workflow manager', () => {
   })
 
   it.each(['hermes', 'claude-code'] as const)('persists a resolvable Session before a failing %s workflow node can leave evidence', async (agent) => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { getDb } = await import('../../packages/server/src/db')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { getDb } = await import('../../packages/server/src/modules/studio/infrastructure/database/index')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const manager = new WorkflowManager()
     chatRunMock.runAndWait.mockReset().mockResolvedValue({ ok: false, error: 'runner failed before session creation' })
@@ -1244,9 +1304,9 @@ describe('workflow manager', () => {
   })
 
   it('records a failed loop epoch when an agent fails during an iteration', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { listWorkflowRunLoopEpochs } = await import('../../packages/server/src/db/hermes/workflow-run-store')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { listWorkflowRunLoopEpochs } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const manager = new WorkflowManager()
     chatRunMock.runAndWait.mockReset()
@@ -1276,8 +1336,8 @@ describe('workflow manager', () => {
   })
 
   it('keys simultaneous nested approvals by execution instance', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const manager = new WorkflowManager()
     chatRunMock.runAndWait.mockReset().mockResolvedValue({ ok: true, output: 'review' })
@@ -1308,9 +1368,9 @@ describe('workflow manager', () => {
   })
 
   it('atomically rejects simultaneous runs of the same workflow before either can overwrite approval status', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { listActiveWorkflowRuns } = await import('../../packages/server/src/db/hermes/workflow-run-store')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { listActiveWorkflowRuns } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const manager = new WorkflowManager()
     chatRunMock.runAndWait.mockReset().mockResolvedValue({ ok: true, output: 'review' })
@@ -1350,9 +1410,9 @@ describe('workflow manager', () => {
   it('times out and removes a pending loop approval at the run deadline', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(1000)
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { listWorkflowRunLoopEpochs } = await import('../../packages/server/src/db/hermes/workflow-run-store')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { listWorkflowRunLoopEpochs } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const manager = new WorkflowManager()
     chatRunMock.runAndWait.mockReset().mockResolvedValue({ ok: true, output: 'review me' })
@@ -1388,9 +1448,9 @@ describe('workflow manager', () => {
   it('fails closed when approval-deadline loop epoch evidence cannot be persisted', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(3000)
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { getDb } = await import('../../packages/server/src/db')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { getDb } = await import('../../packages/server/src/modules/studio/infrastructure/database/index')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const db = getDb()!
     db.exec(`CREATE TRIGGER fail_approval_deadline_epoch BEFORE INSERT ON workflow_run_loop_epochs
@@ -1425,9 +1485,9 @@ describe('workflow manager', () => {
   })
 
   it('records an approval_rejected loop epoch and stops the iteration', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { listWorkflowRunLoopEpochs } = await import('../../packages/server/src/db/hermes/workflow-run-store')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { listWorkflowRunLoopEpochs } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const manager = new WorkflowManager()
     chatRunMock.runAndWait.mockReset().mockResolvedValue({ ok: true, output: 'needs review' })
@@ -1459,9 +1519,9 @@ describe('workflow manager', () => {
   })
 
   it('fails closed when approval_rejected loop epoch evidence cannot be persisted', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { getDb } = await import('../../packages/server/src/db')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { getDb } = await import('../../packages/server/src/modules/studio/infrastructure/database/index')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const db = getDb()!
     db.exec(`CREATE TRIGGER fail_rejected_loop_epoch BEFORE INSERT ON workflow_run_loop_epochs
@@ -1494,8 +1554,8 @@ describe('workflow manager', () => {
   })
 
   it('requires a fresh approval for each loop execution instance', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const manager = new WorkflowManager()
     chatRunMock.runAndWait.mockReset().mockResolvedValue({ ok: true, output: 'continue' })
@@ -1525,9 +1585,9 @@ describe('workflow manager', () => {
   })
 
   it('records a timed_out loop epoch for the runAndWait timeout contract', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { listWorkflowRunLoopEpochs } = await import('../../packages/server/src/db/hermes/workflow-run-store')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { listWorkflowRunLoopEpochs } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const manager = new WorkflowManager()
     let actualTimeoutMs: number | undefined
@@ -1561,9 +1621,9 @@ describe('workflow manager', () => {
   })
 
   it('fails closed when timed_out loop epoch evidence cannot be persisted', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { getDb } = await import('../../packages/server/src/db')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { getDb } = await import('../../packages/server/src/modules/studio/infrastructure/database/index')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const db = getDb()!
     db.exec(`CREATE TRIGGER fail_timed_out_loop_epoch BEFORE INSERT ON workflow_run_loop_epochs
@@ -1594,9 +1654,9 @@ describe('workflow manager', () => {
   })
 
   it('records a canceled loop epoch without letting an aborted agent overwrite canceled state', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { listWorkflowRuns, listWorkflowRunLoopEpochs } = await import('../../packages/server/src/db/hermes/workflow-run-store')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { listWorkflowRuns, listWorkflowRunLoopEpochs } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const manager = new WorkflowManager()
     let release!: () => void
@@ -1636,10 +1696,10 @@ describe('workflow manager', () => {
   })
 
   it('fails closed when canceled loop epoch evidence cannot be persisted', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { getDb } = await import('../../packages/server/src/db')
-    const { listWorkflowRuns } = await import('../../packages/server/src/db/hermes/workflow-run-store')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { getDb } = await import('../../packages/server/src/modules/studio/infrastructure/database/index')
+    const { listWorkflowRuns } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const db = getDb()!
     db.exec(`CREATE TRIGGER fail_canceled_loop_epoch BEFORE INSERT ON workflow_run_loop_epochs
@@ -1678,9 +1738,9 @@ describe('workflow manager', () => {
   })
 
   it('fails closed when failed loop epoch evidence cannot be persisted', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { getDb } = await import('../../packages/server/src/db')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { getDb } = await import('../../packages/server/src/modules/studio/infrastructure/database/index')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const db = getDb()!
     db.exec(`CREATE TRIGGER fail_failed_loop_epoch BEFORE INSERT ON workflow_run_loop_epochs
@@ -1710,9 +1770,9 @@ describe('workflow manager', () => {
   })
 
   it('does not start the next iteration when loop epoch evidence cannot be persisted', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { getDb } = await import('../../packages/server/src/db')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { getDb } = await import('../../packages/server/src/modules/studio/infrastructure/database/index')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const db = getDb()!
     db.exec(`CREATE TRIGGER fail_loop_epoch_evidence BEFORE INSERT ON workflow_run_loop_epochs
@@ -1743,9 +1803,9 @@ describe('workflow manager', () => {
   })
 
   it('does not start a loop target when forward edge evidence cannot be persisted', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { getDb } = await import('../../packages/server/src/db')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { getDb } = await import('../../packages/server/src/modules/studio/infrastructure/database/index')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const db = getDb()!
     db.exec(`CREATE TRIGGER fail_loop_forward_evidence BEFORE INSERT ON workflow_run_edge_evaluations
@@ -1776,9 +1836,9 @@ describe('workflow manager', () => {
   })
 
   it('fails a loop run when its iteration-limit evidence cannot be persisted', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { getDb } = await import('../../packages/server/src/db')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { getDb } = await import('../../packages/server/src/modules/studio/infrastructure/database/index')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const db = getDb()!
     db.exec(`CREATE TRIGGER fail_loop_limit_evidence BEFORE INSERT ON workflow_run_edge_evaluations
@@ -1809,9 +1869,9 @@ describe('workflow manager', () => {
   })
 
   it('executes an id-less feedback edge with the same canonical identity used by compilation', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { listWorkflowRunEdgeEvaluations } = await import('../../packages/server/src/db/hermes/workflow-run-store')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { listWorkflowRunEdgeEvaluations } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const manager = new WorkflowManager()
     chatRunMock.runAndWait.mockReset().mockResolvedValue({ ok: true, output: 'continue' })
@@ -1835,8 +1895,8 @@ describe('workflow manager', () => {
   })
 
   it('applies the run input override only to the first loop iteration and then consumes feedback output', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const manager = new WorkflowManager()
     const inputs: string[] = []
@@ -1870,8 +1930,8 @@ describe('workflow manager', () => {
   })
 
   it('exits a top-level loop when its feedback condition is not taken and records each decision', async () => {
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
-    const { listWorkflowRunEdgeEvaluations } = await import('../../packages/server/src/db/hermes/workflow-run-store')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
+    const { listWorkflowRunEdgeEvaluations } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
     const manager = new WorkflowManager()
     chatRunMock.runAndWait.mockReset()
     const outputs = ['header', 'continue', 'header', 'stop']
@@ -1912,9 +1972,9 @@ describe('workflow manager', () => {
   })
 
   it('evaluates structured JSON fields on feedback edges in the recursive scheduler', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
-    const { listWorkflowRunEdgeEvaluations } = await import('../../packages/server/src/db/hermes/workflow-run-store')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
+    const { listWorkflowRunEdgeEvaluations } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
     initAllStores()
     const manager = new WorkflowManager()
     chatRunMock.runAndWait.mockReset()
@@ -1956,8 +2016,8 @@ describe('workflow manager', () => {
   })
 
   it('executes one downstream node after a top-level loop exits', async () => {
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
-    const { listWorkflowRunEdgeEvaluations } = await import('../../packages/server/src/db/hermes/workflow-run-store')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
+    const { listWorkflowRunEdgeEvaluations } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
     const manager = new WorkflowManager()
     chatRunMock.runAndWait.mockReset()
     chatRunMock.sessionOutputs.clear()
@@ -2006,8 +2066,8 @@ describe('workflow manager', () => {
   })
 
   it('continues through a post-loop DAG after the final persisted exit decision', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const manager = new WorkflowManager()
     chatRunMock.runAndWait.mockReset().mockImplementation(async (request: { session_id: string; input: string }) => {
@@ -2038,8 +2098,8 @@ describe('workflow manager', () => {
   })
 
   it('routes a failed post-loop node through failure and always edges', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const manager = new WorkflowManager()
     chatRunMock.runAndWait.mockReset().mockImplementation(async (request: { session_id: string; input: string }) => {
@@ -2076,8 +2136,8 @@ describe('workflow manager', () => {
   })
 
   it('dispatches multiple loop exit targets only from persisted final-iteration evidence and skips untaken targets', async () => {
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
-    const { listWorkflowRunEdgeEvaluations } = await import('../../packages/server/src/db/hermes/workflow-run-store')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
+    const { listWorkflowRunEdgeEvaluations } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
     const manager = new WorkflowManager()
     chatRunMock.runAndWait.mockReset()
     chatRunMock.sessionOutputs.clear()
@@ -2134,9 +2194,9 @@ describe('workflow manager', () => {
   })
 
   it('does not dispatch any loop exit target when final-iteration exit evidence cannot be persisted', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { getDb } = await import('../../packages/server/src/db')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { getDb } = await import('../../packages/server/src/modules/studio/infrastructure/database/index')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const db = getDb()!
     db.exec(`CREATE TRIGGER fail_final_exit_evidence BEFORE INSERT ON workflow_run_edge_evaluations
@@ -2172,7 +2232,7 @@ describe('workflow manager', () => {
   })
 
   it('applies approval rejection at the loop exit target boundary', async () => {
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     const manager = new WorkflowManager()
     chatRunMock.runAndWait.mockReset().mockResolvedValue({ ok: true, output: 'stop' })
     const workflow = manager.create({
@@ -2202,8 +2262,8 @@ describe('workflow manager', () => {
   })
 
   it('does not dispatch a loop exit target after the shared run deadline', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const manager = new WorkflowManager()
     let now = 1000
@@ -2236,7 +2296,7 @@ describe('workflow manager', () => {
   })
 
   it('finalizes a loop exit target when its approval reaches the shared deadline', async () => {
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     const manager = new WorkflowManager()
     let now = 1_000
     const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => now)
@@ -2268,9 +2328,9 @@ describe('workflow manager', () => {
   })
 
   it('keeps a canceled loop exit target canceled when its agent fails late', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { listWorkflowRuns } = await import('../../packages/server/src/db/hermes/workflow-run-store')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { listWorkflowRuns } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const manager = new WorkflowManager()
     let release!: () => void
@@ -2313,7 +2373,7 @@ describe('workflow manager', () => {
   })
 
   it('finalizes a failed downstream node after a top-level loop exits', async () => {
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     const manager = new WorkflowManager()
     chatRunMock.runAndWait.mockReset()
     chatRunMock.sessionOutputs.clear()
@@ -2353,8 +2413,8 @@ describe('workflow manager', () => {
   })
 
   it('enforces one absolute deadline across sequential DAG executions', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const manager = new WorkflowManager()
     let now = 5000
@@ -2385,8 +2445,8 @@ describe('workflow manager', () => {
   it('times out and removes a pending DAG approval at the absolute run deadline', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(7000)
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const manager = new WorkflowManager()
     chatRunMock.runAndWait.mockReset().mockResolvedValue({ ok: true, output: 'review' })
@@ -2408,8 +2468,8 @@ describe('workflow manager', () => {
   })
 
   it('runs only the matched success branch and skips the unmatched branch without creating a session', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const manager = new WorkflowManager()
     chatRunMock.runAndWait.mockReset()
@@ -2431,7 +2491,7 @@ describe('workflow manager', () => {
       expect(result.run.status).toBe('completed')
       expect(chatRunMock.runAndWait).toHaveBeenCalledTimes(2)
       expect(result.nodeSessions.map(session => session.node_id).sort()).toEqual(['matched', 'source'])
-      const { listWorkflowRunEdgeEvaluations } = await import('../../packages/server/src/db/hermes/workflow-run-store')
+      const { listWorkflowRunEdgeEvaluations } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
       expect(listWorkflowRunEdgeEvaluations(result.run.id).map(item => ({
         edge: item.edge_id, status: item.status, route: item.route, reason: item.reason,
         condition: item.condition_evaluation,
@@ -2444,9 +2504,9 @@ describe('workflow manager', () => {
   })
 
   it('routes pretty-printed JSON output through structured fields instead of serialized text', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { listWorkflowRunEdgeEvaluations } = await import('../../packages/server/src/db/hermes/workflow-run-store')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { listWorkflowRunEdgeEvaluations } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const manager = new WorkflowManager()
     const structuredOutput = JSON.stringify({
@@ -2487,7 +2547,7 @@ describe('workflow manager', () => {
   })
 
   it('fails structured paths closed when assistant output is malformed or ambiguous', async () => {
-    const { evaluateWorkflowEdgeRoute, parseWorkflowStructuredOutput } = await import('../../packages/server/src/services/workflow-manager')
+    const { evaluateWorkflowEdgeRoute, parseWorkflowStructuredOutput } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     const condition = { path: 'outputJson.decision', operator: 'equals', value: 'RELEASED' } as const
     const outputs = [
       '```json\n{"decision":\n```',
@@ -2505,8 +2565,8 @@ describe('workflow manager', () => {
   })
 
   it('runs an any-join once when at least one incoming edge is taken', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const manager = new WorkflowManager()
     chatRunMock.runAndWait.mockReset()
@@ -2533,8 +2593,8 @@ describe('workflow manager', () => {
   })
 
   it('starts an any-join after the first taken edge without waiting for another running source', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const manager = new WorkflowManager()
     let releaseSlow!: () => void
@@ -2572,8 +2632,8 @@ describe('workflow manager', () => {
   })
 
   it('runs failure and always branches after a failed node while skipping its success branch', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const manager = new WorkflowManager()
     chatRunMock.runAndWait.mockReset()
@@ -2606,7 +2666,7 @@ describe('workflow manager', () => {
   })
 
   it('pauses downstream nodes until an approval-required node is approved', async () => {
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     const manager = new WorkflowManager()
     chatRunMock.runAndWait.mockReset()
     chatRunMock.abortSession.mockReset()
@@ -2661,9 +2721,9 @@ describe('workflow manager', () => {
   })
 
   it('keeps a DAG approval wait canceled when stopRun resolves the pending approval', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { listWorkflowRunNodeSessions } = await import('../../packages/server/src/db/hermes/workflow-run-store')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { listWorkflowRunNodeSessions } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const manager = new WorkflowManager()
     chatRunMock.runAndWait.mockReset().mockResolvedValue({ ok: true, output: 'needs approval' })
@@ -2693,7 +2753,7 @@ describe('workflow manager', () => {
   })
 
   it('keeps parallel pending approvals open after one node is rejected', async () => {
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     const manager = new WorkflowManager()
     chatRunMock.runAndWait.mockReset()
     chatRunMock.abortSession.mockReset()
@@ -2758,9 +2818,9 @@ describe('workflow manager', () => {
   })
 
   it('fails closed before starting a target node when edge evidence persistence fails', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { getDb } = await import('../../packages/server/src/db')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { getDb } = await import('../../packages/server/src/modules/studio/infrastructure/database/index')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const db = getDb()!
     db.exec(`CREATE TRIGGER fail_workflow_edge_evidence BEFORE INSERT ON workflow_run_edge_evaluations BEGIN SELECT RAISE(ABORT, 'edge evidence write failed'); END`)
@@ -2788,8 +2848,8 @@ describe('workflow manager', () => {
   })
 
   it('stores distinct execution instances for repeated loop node sessions', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { createWorkflowRun, createWorkflowRunNodeSession, deleteWorkflowRun, listWorkflowRunNodeSessions } = await import('../../packages/server/src/db/hermes/workflow-run-store')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { createWorkflowRun, createWorkflowRunNodeSession, deleteWorkflowRun, listWorkflowRunNodeSessions } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
     initAllStores()
     const run = createWorkflowRun({ workflow_id: `instances-${Date.now()}` })
     createWorkflowRunNodeSession({ run_id: run.id, workflow_id: run.workflow_id, node_id: 'header', session_id: 'header-0', execution_id: 'header@0', iteration_path: [{ loopId: 'loop:retry', iteration: 0 }], sequence: 0 })
@@ -2802,8 +2862,8 @@ describe('workflow manager', () => {
   })
 
   it('round-trips the compiled loop snapshot with a workflow run', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { createWorkflowRun, deleteWorkflowRun, getWorkflowRun } = await import('../../packages/server/src/db/hermes/workflow-run-store')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { createWorkflowRun, deleteWorkflowRun, getWorkflowRun } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
     initAllStores()
     const compiledLoops = [{ id: 'loop:retry', feedbackEdgeId: 'retry', headerNodeId: 'a', latchNodeId: 'b', bodyNodeIds: ['a', 'b'], maxIterations: 3, parentLoopId: null }]
     const run = createWorkflowRun({ workflow_id: `snapshot-${Date.now()}`, compiled_loops: compiledLoops })
@@ -2812,11 +2872,11 @@ describe('workflow manager', () => {
   })
 
   it('stores edge evaluations append-only and deletes them atomically with the run', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
     const {
       createWorkflowRun, createWorkflowRunEdgeEvaluation, createWorkflowRunLoopEpoch, deleteWorkflowRun,
       listWorkflowRunEdgeEvaluations, listWorkflowRunLoopEpochs,
-    } = await import('../../packages/server/src/db/hermes/workflow-run-store')
+    } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
     initAllStores()
     const run = createWorkflowRun({ workflow_id: `evidence-${Date.now()}`, status: 'running' })
     createWorkflowRunEdgeEvaluation({
@@ -2843,9 +2903,9 @@ describe('workflow manager', () => {
   })
 
   it('rejects an invalid rerun snapshot before deleting sessions or mutating the run', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
-    const { createWorkflowRun, createWorkflowRunNodeSession, getWorkflowRun, listWorkflowRunNodeSessions, updateWorkflowRun } = await import('../../packages/server/src/db/hermes/workflow-run-store')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
+    const { createWorkflowRun, createWorkflowRunNodeSession, getWorkflowRun, listWorkflowRunNodeSessions, updateWorkflowRun } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
     initAllStores()
     const manager = new WorkflowManager()
     chatRunMock.runAndWait.mockReset()
@@ -2863,12 +2923,12 @@ describe('workflow manager', () => {
   })
 
   it('revalidates portable skills on rerun and fails closed before mutating the run', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     const {
       createWorkflowRun, createWorkflowRunNodeSession, getWorkflowRun,
       listWorkflowRunNodeSessions, updateWorkflowRun,
-    } = await import('../../packages/server/src/db/hermes/workflow-run-store')
+    } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
     initAllStores()
     const manager = new WorkflowManager()
     chatRunMock.runAndWait.mockReset()
@@ -2905,9 +2965,9 @@ describe('workflow manager', () => {
   })
 
   it('rejects an over-budget rerun before deleting sessions or mutating the run', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { createWorkflowRun, createWorkflowRunNodeSession, getWorkflowRun, listWorkflowRunNodeSessions, updateWorkflowRun } = await import('../../packages/server/src/db/hermes/workflow-run-store')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { createWorkflowRun, createWorkflowRunNodeSession, getWorkflowRun, listWorkflowRunNodeSessions, updateWorkflowRun } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const manager = new WorkflowManager()
     chatRunMock.runAndWait.mockReset()
@@ -2933,9 +2993,9 @@ describe('workflow manager', () => {
   })
 
   it('enforces a fresh absolute deadline across sequential rerun executions', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { createWorkflowRun, createWorkflowRunNodeSession, updateWorkflowRun } = await import('../../packages/server/src/db/hermes/workflow-run-store')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { createWorkflowRun, createWorkflowRunNodeSession, updateWorkflowRun } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const manager = new WorkflowManager()
     let now = 9000
@@ -2980,9 +3040,9 @@ describe('workflow manager', () => {
   it('times out and removes a pending rerun approval at its fresh deadline', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(12000)
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { createWorkflowRun, createWorkflowRunNodeSession, updateWorkflowRun } = await import('../../packages/server/src/db/hermes/workflow-run-store')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { createWorkflowRun, createWorkflowRunNodeSession, updateWorkflowRun } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const manager = new WorkflowManager()
     chatRunMock.runAndWait.mockReset().mockResolvedValue({ ok: true, output: 'review' })
@@ -3008,8 +3068,8 @@ describe('workflow manager', () => {
   })
 
   it('runs a fresh partial start without requiring historical evidence from inactive upstream nodes', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const manager = new WorkflowManager()
     chatRunMock.runAndWait.mockReset().mockResolvedValue({ ok: true, output: 'done' })
@@ -3035,8 +3095,8 @@ describe('workflow manager', () => {
   })
 
   it('non-preserve rerun clears the selected node and ignores its historical incoming decisions', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const manager = new WorkflowManager()
     let sourceOutput = 'stop'
@@ -3069,9 +3129,9 @@ describe('workflow manager', () => {
   })
 
   it('preserve rerun follows only taken routes and skips an all-join blocked by persisted not-taken evidence', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { listWorkflowRunNodeSessions } = await import('../../packages/server/src/db/hermes/workflow-run-store')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { listWorkflowRunNodeSessions } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const manager = new WorkflowManager()
     chatRunMock.runAndWait.mockReset().mockImplementation(async (request: { session_id: string; input: string }) => {
@@ -3107,8 +3167,8 @@ describe('workflow manager', () => {
   })
 
   it('rejects preserve rerun when the latest source execution has no taken downstream route', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const manager = new WorkflowManager()
     chatRunMock.runAndWait.mockReset().mockImplementation(async (request: { session_id: string }) => {
@@ -3132,9 +3192,9 @@ describe('workflow manager', () => {
   })
 
   it('rerun consumes only the latest preserved upstream taken-edge evidence', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { listWorkflowRunEdgeEvaluations, listWorkflowRunNodeSessions } = await import('../../packages/server/src/db/hermes/workflow-run-store')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { listWorkflowRunEdgeEvaluations, listWorkflowRunNodeSessions } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const manager = new WorkflowManager()
     const requests: Array<{ input: string }> = []
@@ -3171,8 +3231,8 @@ describe('workflow manager', () => {
   })
 
   it('accepts only one concurrent rerun lifecycle for the same terminal Run', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const manager = new WorkflowManager()
     chatRunMock.runAndWait.mockReset().mockResolvedValue({ ok: true, output: 'done' })
@@ -3194,9 +3254,9 @@ describe('workflow manager', () => {
   })
 
   it('reruns a bounded loop through the same recursive scheduler semantics as a fresh run', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { listWorkflowRunEdgeEvaluations, listWorkflowRunLoopEpochs } = await import('../../packages/server/src/db/hermes/workflow-run-store')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { listWorkflowRunEdgeEvaluations, listWorkflowRunLoopEpochs } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const manager = new WorkflowManager()
     chatRunMock.runAndWait.mockReset().mockResolvedValue({ ok: true, output: 'continue' })
@@ -3247,8 +3307,8 @@ describe('workflow manager', () => {
   })
 
   it('reruns a strictly nested loop with scoped canonical iteration paths', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const manager = new WorkflowManager()
     chatRunMock.runAndWait.mockReset().mockResolvedValue({ ok: true, output: 'continue' })
@@ -3280,9 +3340,9 @@ describe('workflow manager', () => {
   })
 
   it('attributes failures to the correct disjoint loop epoch without leaking another loop error', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { listWorkflowRunLoopEpochs } = await import('../../packages/server/src/db/hermes/workflow-run-store')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { listWorkflowRunLoopEpochs } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const manager = new WorkflowManager()
     chatRunMock.runAndWait.mockReset().mockImplementation(async (request: { input: string }) => {
@@ -3312,8 +3372,8 @@ describe('workflow manager', () => {
   })
 
   it('reruns only the selected disjoint loop through the shared recursive scheduler', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const manager = new WorkflowManager()
     chatRunMock.runAndWait.mockReset().mockResolvedValue({ ok: true, output: 'continue' })
@@ -3341,9 +3401,9 @@ describe('workflow manager', () => {
   })
 
   it('reruns conditional routes with the same skipped propagation as a fresh run', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { listWorkflowRunEdgeEvaluations } = await import('../../packages/server/src/db/hermes/workflow-run-store')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { listWorkflowRunEdgeEvaluations } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const manager = new WorkflowManager()
     chatRunMock.runAndWait.mockReset().mockImplementation(async (request: { session_id: string; input: string }) => {
@@ -3379,9 +3439,9 @@ describe('workflow manager', () => {
   })
 
   it('does not let late rerun completion override cancellation or dispatch downstream', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { listWorkflowRunEdgeEvaluations, listWorkflowRunNodeSessions } = await import('../../packages/server/src/db/hermes/workflow-run-store')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { listWorkflowRunEdgeEvaluations, listWorkflowRunNodeSessions } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const manager = new WorkflowManager()
     chatRunMock.runAndWait.mockReset().mockResolvedValue({ ok: true, output: 'fresh' })
@@ -3413,9 +3473,9 @@ describe('workflow manager', () => {
   })
 
   it('reruns failure and always routes through the shared scheduler', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { listWorkflowRunEdgeEvaluations } = await import('../../packages/server/src/db/hermes/workflow-run-store')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { listWorkflowRunEdgeEvaluations } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const manager = new WorkflowManager()
     let failSource = false
@@ -3447,13 +3507,13 @@ describe('workflow manager', () => {
   })
 
   it('reruns incomplete external upstream dependencies for downstream joins', async () => {
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     const {
       createWorkflowRun,
       createWorkflowRunNodeSession,
       listWorkflowRunNodeSessions,
       updateWorkflowRun,
-    } = await import('../../packages/server/src/db/hermes/workflow-run-store')
+    } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
     const manager = new WorkflowManager()
     chatRunMock.runAndWait.mockReset()
     chatRunMock.abortSession.mockReset()
@@ -3512,11 +3572,11 @@ describe('workflow manager', () => {
     }
   })
   it('recovers every active run after restart without the UI pagination limit', { timeout: 20000 }, async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
     const {
       createWorkflowRun, createWorkflowRunNodeSession, getWorkflowRun, listAllWorkflowRuns,
-    } = await import('../../packages/server/src/db/hermes/workflow-run-store')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     chatRunMock.abortSession.mockReset().mockResolvedValue(undefined)
     const manager = new WorkflowManager()
@@ -3543,11 +3603,11 @@ describe('workflow manager', () => {
   })
 
   it('persists restart terminal state before aborting surviving runners and never aborts completed sessions', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
     const {
       createWorkflowRun, createWorkflowRunNodeSession, getWorkflowRun, listWorkflowRunNodeSessions,
-    } = await import('../../packages/server/src/db/hermes/workflow-run-store')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const manager = new WorkflowManager()
     const workflow = manager.create({ name: `Recovery ordering ${Date.now()}`, profile: 'default', nodes: [], edges: [] })
@@ -3564,7 +3624,7 @@ describe('workflow manager', () => {
     })
     try {
       await expect(manager.recoverActiveRuns(workflow.id)).resolves.toEqual({ runs: 1, sessions: 1 })
-      const { listWorkflowRunLoopEpochs } = await import('../../packages/server/src/db/hermes/workflow-run-store')
+      const { listWorkflowRunLoopEpochs } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
       expect(listWorkflowRunLoopEpochs(run.id)).toEqual([expect.objectContaining({
         loop_id: 'loop:active', iteration: 0, status: 'failed', exit_reason: expect.stringContaining('server restarted'),
       })])
@@ -3574,12 +3634,12 @@ describe('workflow manager', () => {
   })
 
   it('keeps recovered and canceled terminal state authoritative against late completion', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
     const {
       createWorkflowRun, createWorkflowRunNodeSession, getWorkflowRun, listWorkflowRunNodeSessions,
       updateWorkflowRun, updateWorkflowRunNodeSession,
-    } = await import('../../packages/server/src/db/hermes/workflow-run-store')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const manager = new WorkflowManager()
     const workflow = manager.create({ name: `Late completion ${Date.now()}`, profile: 'default', nodes: [], edges: [] })
@@ -3596,9 +3656,9 @@ describe('workflow manager', () => {
   })
 
   it('stopRun preserves terminal node evidence and cancels only active executions', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { createWorkflowRun, createWorkflowRunNodeSession, listWorkflowRunNodeSessions } = await import('../../packages/server/src/db/hermes/workflow-run-store')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { createWorkflowRun, createWorkflowRunNodeSession, listWorkflowRunNodeSessions } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const manager = new WorkflowManager()
     const workflow = manager.create({ name: `Stop terminal authority ${Date.now()}`, profile: 'default', nodes: [], edges: [] })
@@ -3620,9 +3680,9 @@ describe('workflow manager', () => {
   })
 
   it('persists canceled run and sessions before awaiting runner abort', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { createWorkflowRun, createWorkflowRunNodeSession, getWorkflowRun, listWorkflowRunNodeSessions } = await import('../../packages/server/src/db/hermes/workflow-run-store')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { createWorkflowRun, createWorkflowRunNodeSession, getWorkflowRun, listWorkflowRunNodeSessions } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const manager = new WorkflowManager()
     const workflow = manager.create({ name: `Stop ordering ${Date.now()}`, profile: 'default', nodes: [], edges: [] })
@@ -3639,9 +3699,9 @@ describe('workflow manager', () => {
   })
 
   it('deletes workflow runs beyond the public 500-run page', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { createWorkflowRun, getWorkflowRun, listAllWorkflowRuns } = await import('../../packages/server/src/db/hermes/workflow-run-store')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { createWorkflowRun, getWorkflowRun, listAllWorkflowRuns } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const manager = new WorkflowManager()
     const workflow = manager.create({ name: `Delete all ${Date.now()}`, profile: 'default', nodes: [], edges: [] })
@@ -3652,8 +3712,8 @@ describe('workflow manager', () => {
   })
 
   it('rejects orphan Node, Edge, and Loop evidence for a missing Run', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { createWorkflowRunEdgeEvaluation, createWorkflowRunLoopEpoch, createWorkflowRunNodeSession } = await import('../../packages/server/src/db/hermes/workflow-run-store')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { createWorkflowRunEdgeEvaluation, createWorkflowRunLoopEpoch, createWorkflowRunNodeSession } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
     initAllStores()
     const missing = `missing-${Date.now()}`
     expect(() => createWorkflowRunNodeSession({ run_id: missing, workflow_id: 'wf', node_id: 'n', session_id: 's' })).toThrow('missing workflow run')
@@ -3669,8 +3729,8 @@ describe('workflow manager', () => {
   })
 
   it('rejects late node execution creation after a run is terminal', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { createWorkflowRun, createWorkflowRunNodeSession, updateWorkflowRun } = await import('../../packages/server/src/db/hermes/workflow-run-store')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { createWorkflowRun, createWorkflowRunNodeSession, updateWorkflowRun } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
     initAllStores()
     const run = createWorkflowRun({ workflow_id: `terminal-node-${Date.now()}`, status: 'running' })
     updateWorkflowRun(run.id, { status: 'canceled', finished_at: Date.now(), error: 'stopped' })
@@ -3680,10 +3740,10 @@ describe('workflow manager', () => {
   })
 
   it('rejects late edge and loop evidence after a run is terminal', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
     const {
       createWorkflowRun, createWorkflowRunEdgeEvaluation, createWorkflowRunLoopEpoch, updateWorkflowRun,
-    } = await import('../../packages/server/src/db/hermes/workflow-run-store')
+    } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
     initAllStores()
     const run = createWorkflowRun({ workflow_id: `terminal-evidence-${Date.now()}`, status: 'running' })
     updateWorkflowRun(run.id, { status: 'failed', finished_at: Date.now(), error: 'terminal' })
@@ -3699,9 +3759,9 @@ describe('workflow manager', () => {
   })
 
   it('does not let a late successful node completion override stopRun', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { listWorkflowRunEdgeEvaluations, listWorkflowRunNodeSessions } = await import('../../packages/server/src/db/hermes/workflow-run-store')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { listWorkflowRunEdgeEvaluations, listWorkflowRunNodeSessions } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const manager = new WorkflowManager()
     let release!: (value: any) => void
@@ -3727,8 +3787,8 @@ describe('workflow manager', () => {
 
 
   it('starts an any-join inside a loop after the first taken edge while a sibling source is still running', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const manager = new WorkflowManager()
     let releaseSlow!: () => void
@@ -3773,9 +3833,9 @@ describe('workflow manager', () => {
   })
 
   it('does not take feedback or start another iteration when the loop latch is skipped', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { listWorkflowRunEdgeEvaluations, listWorkflowRunLoopEpochs } = await import('../../packages/server/src/db/hermes/workflow-run-store')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { listWorkflowRunEdgeEvaluations, listWorkflowRunLoopEpochs } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const manager = new WorkflowManager()
     chatRunMock.runAndWait.mockReset().mockImplementation(async (request: { session_id: string }) => {
@@ -3809,9 +3869,9 @@ describe('workflow manager', () => {
   })
 
   it('carries the taken feedback output and evidence id into the next header execution', async () => {
-    const { initAllStores } = await import('../../packages/server/src/db/hermes/init')
-    const { listWorkflowRunEdgeEvaluations, listWorkflowRunNodeSessions } = await import('../../packages/server/src/db/hermes/workflow-run-store')
-    const { WorkflowManager } = await import('../../packages/server/src/services/workflow-manager')
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { listWorkflowRunEdgeEvaluations, listWorkflowRunNodeSessions } = await import('../../packages/server/src/modules/studio/repositories/workflow-run-store')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
     initAllStores()
     const manager = new WorkflowManager()
     const requests: Array<{ input: string }> = []

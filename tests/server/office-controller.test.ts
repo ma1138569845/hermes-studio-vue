@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { actionStats, drainActions, enqueueAction } from '../../packages/server/src/controllers/hermes/office'
-import { reset } from '../../packages/server/src/services/hermes/office-actions'
+import { actionStats, drainActions, enqueueAction } from '../../packages/server/src/modules/hermes/controllers/office'
+import { reset } from '../../packages/server/src/modules/studio/services/office-actions'
 
 function makeCtx(body?: unknown): any {
   return { request: { body }, status: 200, body: undefined as unknown }

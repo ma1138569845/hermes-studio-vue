@@ -3,20 +3,25 @@ import { createCipheriv, randomBytes } from 'crypto'
 import { tmpdir } from 'os'
 import { dirname, join } from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { config } from '../../packages/server/src/config'
-import { claudeProxyMessages, claudeProxyModels, registerClaudeCodeProxyTarget } from '../../packages/server/src/services/coding-agents/claude-code/proxy'
-import { codexProxyModels, codexProxyResponses, registerCodexProxyTarget } from '../../packages/server/src/services/coding-agents/codex/proxy'
+import { config } from '../../packages/server/src/modules/studio/public/config'
+import { claudeProxyMessages, claudeProxyModels, registerClaudeCodeProxyTarget } from '../../packages/server/src/modules/coding-agents/services/claude-code/proxy'
+import {
+  codexProxyModels,
+  codexProxyResponses,
+  isAuthorizedCodexProxyRequest,
+  registerCodexProxyTarget,
+} from '../../packages/server/src/modules/coding-agents/services/codex/proxy'
 import {
   codexToolSearchConfig,
   migratePersistedPiRuntimeMcpConfigs,
   prepareCodingAgentLaunch,
   restorePersistedPiProxyTargets,
-} from '../../packages/server/src/services/coding-agents'
-import { getModelContextLength } from '../../packages/server/src/services/hermes/model-context'
+} from '../../packages/server/src/bootstrap/coding-agents'
+import { getModelContextLength } from '../../packages/server/src/modules/hermes/services/models/context'
 import {
   normalizePiThinkingLevel,
   piModelSupportsThinking,
-} from '../../packages/server/src/services/coding-agents/pi/thinking'
+} from '../../packages/server/src/modules/coding-agents/services/pi/thinking'
 
 const LAUNCHER_FILE = process.platform === 'win32' ? 'launch.ps1' : 'launch.sh'
 const RPC_MODE_ARGS = process.platform === 'win32' ? `'--mode' 'rpc'` : '--mode rpc'
@@ -421,6 +426,8 @@ describe('coding agent launch preparation', () => {
 
   it('launches Claude Code with the global config when requested', async () => {
     const home = makeHome()
+    const rootDir = join(home, 'coding-agent', 'model', 'default', 'global', 'claude-code')
+    const promptPath = join(rootDir, 'hermes-rules.md')
 
     const result = await prepareCodingAgentLaunch('claude-code', {
       mode: 'global',
@@ -433,29 +440,29 @@ describe('coding agent launch preparation', () => {
       profile: 'default',
       provider: 'global',
       model: '',
-      rootDir: join(home, 'coding-agent', 'workspace', 'default', 'global'),
+      rootDir,
       workspaceDir: join(home, 'coding-agent', 'workspace', 'default', 'global'),
       command: 'claude',
       args: [
         '--append-system-prompt-file',
-        join(home, 'global-home', '.claude', 'hermes-rules.md'),
+        promptPath,
         '--dangerously-skip-permissions',
       ],
       env: {},
-      shellCommand: shellCommandFor(
-        join(home, 'coding-agent', 'workspace', 'default', 'global'),
-        'claude',
-        ['--append-system-prompt-file', join(home, 'global-home', '.claude', 'hermes-rules.md'), '--dangerously-skip-permissions'],
-      ),
+      shellCommand: process.platform === 'win32'
+        ? shellCommandFor(join(home, 'coding-agent', 'workspace', 'default', 'global'), 'claude', ['--append-system-prompt-file', promptPath, '--dangerously-skip-permissions'])
+        : `cd ${join(home, 'coding-agent', 'workspace', 'default', 'global')} && claude --append-system-prompt-file ${promptPath} --dangerously-skip-permissions`,
       files: [{
         key: 'prompt',
-        path: '~/.claude/hermes-rules.md',
-        absolutePath: join(home, 'global-home', '.claude', 'hermes-rules.md'),
+        path: 'hermes-rules.md',
+        absolutePath: promptPath,
       }],
+      promptFile: promptPath,
     })
-    const prompt = readFileSync(join(home, 'global-home', '.claude', 'hermes-rules.md'), 'utf-8')
+    const prompt = readFileSync(promptPath, 'utf-8')
     expect(prompt).toContain('<!-- BEGIN HERMES WEB UI PROMPT -->')
     expect(prompt).toContain('# 输出格式规范')
+    expect(existsSync(join(home, 'global-home', '.claude', 'hermes-rules.md'))).toBe(false)
   })
 
   it.skipIf(process.platform === 'win32')('uses Claude Code auto permission mode instead of dangerous bypass when running as root', async () => {
@@ -470,20 +477,26 @@ describe('coding agent launch preparation', () => {
     expect(result).toMatchObject({
       agentId: 'claude-code',
       mode: 'global',
-      rootDir: join(home, 'coding-agent', 'workspace', 'default', 'global'),
+      rootDir: join(home, 'coding-agent', 'model', 'default', 'global', 'claude-code'),
       command: 'claude',
       args: [
         '--append-system-prompt-file',
-        join(home, 'global-home', '.claude', 'hermes-rules.md'),
+        join(home, 'coding-agent', 'model', 'default', 'global', 'claude-code', 'hermes-rules.md'),
         '--permission-mode',
         'auto',
       ],
-      shellCommand: `cd ${join(home, 'coding-agent', 'workspace', 'default', 'global')} && claude --append-system-prompt-file ${join(home, 'global-home', '.claude', 'hermes-rules.md')} --permission-mode auto`,
+      shellCommand: `cd ${join(home, 'coding-agent', 'workspace', 'default', 'global')} && claude --append-system-prompt-file ${join(home, 'coding-agent', 'model', 'default', 'global', 'claude-code', 'hermes-rules.md')} --permission-mode auto`,
     })
   })
 
   it('launches Codex with the global config when requested', async () => {
     const home = makeHome()
+    const globalCodexHome = join(home, 'global-home', '.codex')
+    const rootDir = join(home, 'coding-agent', 'model', 'default', 'global', 'codex')
+    mkdirSync(globalCodexHome, { recursive: true })
+    writeFileSync(join(globalCodexHome, 'config.toml'), 'model = "gpt-global"\n')
+    writeFileSync(join(globalCodexHome, 'auth.json'), '{"token":"user-token"}\n')
+    writeFileSync(join(globalCodexHome, 'AGENTS.md'), 'User global Codex instructions.\n')
 
     const result = await prepareCodingAgentLaunch('codex', {
       mode: 'global',
@@ -496,14 +509,62 @@ describe('coding agent launch preparation', () => {
       profile: 'default',
       provider: 'global',
       model: '',
-      rootDir: join(home, 'coding-agent', 'workspace', 'default', 'global'),
+      rootDir,
       workspaceDir: join(home, 'coding-agent', 'workspace', 'default', 'global'),
       command: 'codex',
       args: [],
-      env: {},
-      shellCommand: shellCommandFor(join(home, 'coding-agent', 'workspace', 'default', 'global'), 'codex'),
-      files: [],
+      env: { CODEX_HOME: rootDir },
+      files: [{ key: 'agents', path: 'AGENTS.md', absolutePath: join(rootDir, 'AGENTS.md') }],
+      promptFile: join(rootDir, 'AGENTS.md'),
     })
+    expect(result.shellCommand).toContain(process.platform === 'win32' ? `$env:CODEX_HOME = '${rootDir}'` : `CODEX_HOME=${rootDir}`)
+    expect(result.shellCommand).toContain('codex')
+    expect(readFileSync(join(rootDir, 'config.toml'), 'utf8')).toBe('model = "gpt-global"\n')
+    expect(readFileSync(join(rootDir, 'auth.json'), 'utf8')).toBe('{"token":"user-token"}\n')
+    const prompt = readFileSync(join(rootDir, 'AGENTS.md'), 'utf8')
+    expect(prompt).toContain('User global Codex instructions.')
+    expect(prompt).toContain('DechnicAuditor MCP usage')
+    expect(readFileSync(join(globalCodexHome, 'config.toml'), 'utf8')).toBe('model = "gpt-global"\n')
+    expect(readFileSync(join(globalCodexHome, 'auth.json'), 'utf8')).toBe('{"token":"user-token"}\n')
+    expect(readFileSync(join(globalCodexHome, 'AGENTS.md'), 'utf8')).toBe('User global Codex instructions.\n')
+  })
+
+  it('launches Grok from an isolated shadow home without changing the user config', async () => {
+    const home = makeHome()
+    const globalGrokHome = join(home, 'global-home', '.grok')
+    const rootDir = join(home, 'coding-agent', 'model', 'default', 'global', 'grok')
+    mkdirSync(globalGrokHome, { recursive: true })
+    writeFileSync(join(globalGrokHome, 'config.toml'), '[models]\ndefault = "grok-4"\n')
+    writeFileSync(join(globalGrokHome, 'auth.json'), '{"token":"user-token"}\n')
+    writeFileSync(join(globalGrokHome, 'AGENTS.md'), 'User global Grok instructions.\n')
+
+    const result = await prepareCodingAgentLaunch('grok', {
+      mode: 'global',
+      profile: 'default',
+    })
+
+    expect(result).toMatchObject({
+      agentId: 'grok',
+      mode: 'global',
+      profile: 'default',
+      provider: 'global',
+      model: '',
+      rootDir,
+      workspaceDir: join(home, 'coding-agent', 'workspace', 'default', 'global'),
+      command: 'grok',
+      args: ['--always-approve', '--no-auto-update'],
+      env: { GROK_HOME: rootDir },
+      promptFile: join(rootDir, 'AGENTS.md'),
+    })
+    expect(result.files).toEqual(expect.arrayContaining([
+      { key: 'config', path: 'config.toml', absolutePath: join(rootDir, 'config.toml') },
+      { key: 'agents', path: 'AGENTS.md', absolutePath: join(rootDir, 'AGENTS.md') },
+    ]))
+    expect(readFileSync(join(rootDir, 'config.toml'), 'utf8')).toContain('[mcp_servers.hermes-studio-api]')
+    expect(readFileSync(join(rootDir, 'auth.json'), 'utf8')).toBe('{"token":"user-token"}\n')
+    expect(readFileSync(join(rootDir, 'AGENTS.md'), 'utf8')).toContain('User global Grok instructions.')
+    expect(readFileSync(join(globalGrokHome, 'config.toml'), 'utf8')).toBe('[models]\ndefault = "grok-4"\n')
+    expect(readFileSync(join(globalGrokHome, 'AGENTS.md'), 'utf8')).toBe('User global Grok instructions.\n')
   })
 
   it('launches interactive Pi with its global config when requested', async () => {
@@ -513,6 +574,8 @@ describe('coding agent launch preparation', () => {
       mode: 'global',
       profile: 'default',
     })
+    const rootDir = result.rootDir
+    const promptPath = join(rootDir, 'APPEND_SYSTEM.md')
 
     expect(result).toMatchObject({
       agentId: 'pi',
@@ -520,14 +583,20 @@ describe('coding agent launch preparation', () => {
       profile: 'default',
       provider: 'global',
       model: '',
-      rootDir: join(home, 'coding-agent', 'workspace', 'default', 'global'),
+      rootDir,
       workspaceDir: join(home, 'coding-agent', 'workspace', 'default', 'global'),
       command: 'pi',
-      args: [],
+      args: ['--append-system-prompt', promptPath],
       env: {},
-      shellCommand: shellCommandFor(join(home, 'coding-agent', 'workspace', 'default', 'global'), 'pi'),
-      files: [],
+      shellCommand: process.platform === 'win32'
+        ? shellCommandFor(join(home, 'coding-agent', 'workspace', 'default', 'global'), 'pi', ['--append-system-prompt', promptPath])
+        : `cd ${join(home, 'coding-agent', 'workspace', 'default', 'global')} && pi --append-system-prompt ${promptPath}`,
+      files: [{ key: 'prompt', path: 'APPEND_SYSTEM.md', absolutePath: promptPath }],
+      promptFile: promptPath,
     })
+    expect(rootDir).toContain(join('coding-agent', 'model', 'default', 'global', 'pi', 'runs'))
+    expect(readFileSync(promptPath, 'utf8')).toContain('DechnicAuditor MCP usage')
+    expect(existsSync(join(home, 'global-home', '.pi', 'agent', 'APPEND_SYSTEM.md'))).toBe(false)
   })
 
   it('runs Studio Pi chats over RPC while preserving the global Pi config', async () => {
@@ -571,7 +640,7 @@ describe('coding agent launch preparation', () => {
     expect(readFileSync(join(result.rootDir, LAUNCHER_FILE), 'utf8')).toContain(RPC_MODE_ARGS)
   })
 
-  it('preserves existing global Claude Code prompt files while updating the Hermes block', async () => {
+  it('does not modify an existing global Claude Code prompt file', async () => {
     const home = makeHome()
     const claudePromptPath = join(home, 'global-home', '.claude', 'hermes-rules.md')
     mkdirSync(dirname(claudePromptPath), { recursive: true })
@@ -580,9 +649,9 @@ describe('coding agent launch preparation', () => {
     await prepareCodingAgentLaunch('claude-code', { mode: 'global', profile: 'default' })
     await prepareCodingAgentLaunch('claude-code', { mode: 'global', profile: 'default' })
 
-    const claudePrompt = readFileSync(claudePromptPath, 'utf-8')
-    expect(claudePrompt).toContain('Existing Claude notes')
-    expect(claudePrompt.match(/BEGIN HERMES WEB UI PROMPT/g)).toHaveLength(1)
+    expect(readFileSync(claudePromptPath, 'utf-8')).toBe('Existing Claude notes\n')
+    const studioPromptPath = join(home, 'coding-agent', 'model', 'default', 'global', 'claude-code', 'hermes-rules.md')
+    expect(readFileSync(studioPromptPath, 'utf-8').match(/BEGIN HERMES WEB UI PROMPT/g)).toHaveLength(1)
   })
 
   it('uses a selected workspace directory when launching a coding agent', async () => {
@@ -1235,6 +1304,44 @@ describe('coding agent launch preparation', () => {
     ]))
   })
 
+  it('runs scoped Grok through the local proxy without writing the upstream secret to disk', async () => {
+    const home = makeHome()
+
+    const result = await prepareCodingAgentLaunch('grok', {
+      profile: 'default',
+      provider: 'deepseek',
+      model: 'deepseek-v4-pro',
+      baseUrl: 'https://api.deepseek.com',
+      apiKey: 'sk-upstream-secret',
+      apiMode: 'chat_completions',
+      reasoningEffort: 'high',
+    })
+
+    expect(result.rootDir).toBe(join(home, 'coding-agent', 'model', 'default', 'deepseek', 'grok'))
+    expect(result.args).toEqual([
+      '--model', 'hermes-studio',
+      '--always-approve',
+      '--no-auto-update',
+      '--reasoning-effort', 'high',
+    ])
+    expect(result.env.GROK_HOME).toBe(result.rootDir)
+    expect(result.env.HERMES_STUDIO_GROK_API_KEY).toMatch(/^hwui_/)
+    expect(result.env.HERMES_STUDIO_GROK_API_KEY).not.toBe('sk-upstream-secret')
+
+    const config = readFileSync(join(result.rootDir, 'config.toml'), 'utf-8')
+    expect(config).toContain('[model.hermes-studio]')
+    expect(config).toContain('model = "deepseek-v4-pro"')
+    expect(config).toContain('api_backend = "responses"')
+    expect(config).toContain('env_key = "HERMES_STUDIO_GROK_API_KEY"')
+    expect(config).toContain(`/api/codex-proxy/`)
+    expect(config).toContain('[mcp_servers.hermes-studio-api]')
+    expect(config).not.toContain('sk-upstream-secret')
+
+    const prompt = readFileSync(join(result.rootDir, 'AGENTS.md'), 'utf-8')
+    expect(prompt).toContain('selected upstream provider is `deepseek`')
+    expect(prompt).toContain('exact model ID is `deepseek-v4-pro`')
+  })
+
   it('points Codex Chat Completions providers at the local Responses proxy', async () => {
     const home = makeHome()
 
@@ -1359,6 +1466,94 @@ describe('coding agent launch preparation', () => {
     expect(config).toContain('requires_openai_auth = false')
     expect(config).toMatch(/experimental_bearer_token = "hwui_[^"]+"/)
     expect(result.rootDir).toBe(join(home, 'coding-agent', 'model', 'default', 'anthropic-compatible', 'codex'))
+  })
+
+  it('authenticates the enlarged Codex Responses parser with the registered route token', () => {
+    const target = registerCodexProxyTarget({
+      profile: 'default',
+      provider: 'parser-auth',
+      model: 'test-model',
+      baseUrl: 'https://api.example.com',
+      apiKey: 'sk-upstream',
+      apiMode: 'codex_responses',
+    })
+    const context = (token: string) => ({
+      path: `/api/codex-proxy/${target.routeKey}/v1/responses`,
+      get(name: string) {
+        return name.toLowerCase() === 'authorization' ? `Bearer ${token}` : ''
+      },
+    }) as any
+
+    expect(isAuthorizedCodexProxyRequest(context(target.token))).toBe(true)
+    expect(isAuthorizedCodexProxyRequest(context('wrong-token'))).toBe(false)
+  })
+
+  it.each([
+    ['chat_completions', 'https://chat-history.example.com'],
+    ['anthropic_messages', 'https://anthropic-history.example.com'],
+    ['codex_responses', 'https://responses-history.example.com/v1'],
+  ] as const)('strips historical inline images before %s provider dispatch', async (apiMode, baseUrl) => {
+    const target = registerCodexProxyTarget({
+      profile: 'default',
+      provider: `history-${apiMode}`,
+      model: 'test-model',
+      baseUrl,
+      apiKey: 'sk-upstream',
+      apiMode,
+      agentSessionId: `history-${apiMode}`,
+    })
+    const fetchMock = vi.fn(async () => {
+      if (apiMode === 'chat_completions') {
+        return new Response(JSON.stringify({
+          id: 'chatcmpl_history',
+          choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: 'ok' } }],
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      if (apiMode === 'anthropic_messages') {
+        return new Response(JSON.stringify({
+          id: 'msg_history',
+          type: 'message',
+          role: 'assistant',
+          content: [{ type: 'text', text: 'ok' }],
+          stop_reason: 'end_turn',
+          usage: { input_tokens: 1, output_tokens: 1 },
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      return new Response(JSON.stringify({
+        id: 'resp_history',
+        object: 'response',
+        status: 'completed',
+        output: [],
+        usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const historicalImage = 'data:image/png;base64,HISTORICAL'
+    const currentImageA = 'data:image/png;base64,CURRENT_A'
+    const currentImageB = 'data:image/jpeg;base64,CURRENT_B'
+    const body = {
+      input: [
+        { role: 'user', content: [{ type: 'input_image', image_url: historicalImage }] },
+        { role: 'assistant', content: [{ type: 'output_text', text: 'old response' }] },
+        {
+          role: 'user',
+          content: [
+            { type: 'input_text', text: 'current request' },
+            { type: 'input_image', image_url: currentImageA },
+            { type: 'input_image', image_url: currentImageB },
+          ],
+        },
+      ],
+    }
+
+    await codexProxyResponses(makeProxyContext(target.routeKey, target.token, body))
+
+    const forwarded = String(fetchMock.mock.calls[0]?.[1]?.body || '')
+    expect(forwarded).not.toContain('HISTORICAL')
+    expect(forwarded).toContain('historical inline image omitted before provider request')
+    expect(forwarded).toContain('CURRENT_A')
+    expect(forwarded).toContain('CURRENT_B')
+    expect(body.input[0].content[0].image_url).toBe(historicalImage)
   })
 
   it('adapts Codex Responses requests to OpenAI Chat Completions', async () => {
@@ -1769,6 +1964,8 @@ describe('coding agent launch preparation', () => {
     const chunks: string[] = []
     for await (const chunk of ctx.body) chunks.push(String(chunk))
     const sse = chunks.join('')
+    expect(sse).toMatch(/event: response\.created[\s\S]*"created_at":\d+/)
+    expect(sse).toContain('"sequence_number":0')
     expect(sse).toContain('event: response.output_item.added')
     expect(sse).toContain('event: response.content_part.added')
     expect(sse).toContain('"delta":"p"')

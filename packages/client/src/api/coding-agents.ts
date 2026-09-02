@@ -1,7 +1,7 @@
 import { request } from './client'
-import type { ProviderApiMode } from './hermes/system'
+import type { ProviderApiMode } from './studio/provider-api-mode'
 
-export type CodingAgentId = 'claude-code' | 'codex' | 'pi'
+export type CodingAgentId = 'claude-code' | 'codex' | 'pi' | 'grok'
 export type ChatCodingAgentId = CodingAgentId | 'ekko-agent'
 export const CODING_AGENT_API_MODES = [
   'chat_completions',
@@ -58,6 +58,8 @@ export interface CodingAgentToolStatus {
   installed: boolean
   version: string
   rawVersion: string
+  source?: 'user-cli' | 'not-installed'
+  path?: string
   error?: string
 }
 

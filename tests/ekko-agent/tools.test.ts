@@ -1,13 +1,15 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   AgentToolError,
+  DEFAULT_READ_FILE_MAX_BYTES,
   DelegateTaskTool,
   ReadFileTool,
   TerminalExecTool,
+  ViewImageTool,
   WriteFileTool,
   createDefaultToolRegistry,
   sanitizeAgentToolResult,
@@ -69,6 +71,71 @@ describe('ekko-agent tools', () => {
     })
   })
 
+  it('bounds large file reads and supports continuing from the next byte offset', async () => {
+    const reader = new ReadFileTool()
+    const content = 'x'.repeat(DEFAULT_READ_FILE_MAX_BYTES + 25)
+    await writeFile(path.join(workspaceRoot, 'large.txt'), content)
+
+    const first = await reader.execute({
+      path: 'large.txt',
+      limit: DEFAULT_READ_FILE_MAX_BYTES * 2,
+    }, { workspaceRoot })
+
+    expect(first.content.startsWith('x'.repeat(DEFAULT_READ_FILE_MAX_BYTES))).toBe(true)
+    expect(first.content).toContain(`[read_file truncated: returned bytes 0-${DEFAULT_READ_FILE_MAX_BYTES - 1} of ${content.length}; call again with offset=${DEFAULT_READ_FILE_MAX_BYTES}]`)
+    expect(first.data).toMatchObject({
+      bytes: DEFAULT_READ_FILE_MAX_BYTES,
+      totalBytes: content.length,
+      offset: 0,
+      nextOffset: DEFAULT_READ_FILE_MAX_BYTES,
+      truncated: true,
+      limit: DEFAULT_READ_FILE_MAX_BYTES,
+    })
+
+    const second = await reader.execute({
+      path: 'large.txt',
+      offset: DEFAULT_READ_FILE_MAX_BYTES,
+    }, { workspaceRoot })
+    expect(second).toMatchObject({
+      ok: true,
+      content: 'x'.repeat(25),
+      data: {
+        bytes: 25,
+        totalBytes: content.length,
+        offset: DEFAULT_READ_FILE_MAX_BYTES,
+        nextOffset: content.length,
+        truncated: false,
+      },
+    })
+  })
+
+  it('does not split a UTF-8 code point at a read boundary', async () => {
+    const reader = new ReadFileTool()
+    await writeFile(path.join(workspaceRoot, 'unicode.txt'), 'aaaa😀z')
+
+    const first = await reader.execute({ path: 'unicode.txt', limit: 5 }, { workspaceRoot })
+    expect(first.content).toMatch(/^aaaa\n\n\[read_file truncated:/)
+    expect(first.content).not.toContain('�')
+    expect(first.data).toMatchObject({ bytes: 4, nextOffset: 4, truncated: true })
+
+    await expect(reader.execute({ path: 'unicode.txt', offset: 4 }, { workspaceRoot })).resolves.toMatchObject({
+      content: '😀z',
+      data: { bytes: 5, nextOffset: 9, truncated: false },
+    })
+  })
+
+  it('rejects invalid read ranges', async () => {
+    const reader = new ReadFileTool()
+    await writeFile(path.join(workspaceRoot, 'note.txt'), 'hello')
+
+    await expect(reader.execute({ path: 'note.txt', offset: -1 }, { workspaceRoot }))
+      .rejects.toMatchObject({ code: 'INVALID_TOOL_INPUT' })
+    await expect(reader.execute({ path: 'note.txt', limit: 0 }, { workspaceRoot }))
+      .rejects.toMatchObject({ code: 'INVALID_TOOL_INPUT' })
+    await expect(reader.execute({ path: 'note.txt', limit: 3 }, { workspaceRoot }))
+      .rejects.toMatchObject({ code: 'INVALID_TOOL_INPUT' })
+  })
+
   it('blocks file paths outside workspaceRoot', async () => {
     const reader = new ReadFileTool()
 
@@ -76,6 +143,73 @@ describe('ekko-agent tools', () => {
     await expect(reader.execute({ path: '../outside.txt' }, { workspaceRoot })).rejects.toMatchObject({
       code: 'PATH_OUTSIDE_WORKSPACE',
     })
+  })
+
+  it('loads supported workspace images as multimodal tool results', async () => {
+    const image = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+      'base64',
+    )
+    await writeFile(path.join(workspaceRoot, 'preview.png'), image)
+    const viewer = new ViewImageTool()
+
+    await expect(viewer.execute({ path: 'preview.png' }, { workspaceRoot })).resolves.toMatchObject({
+      ok: true,
+      contentParts: [{
+        type: 'image',
+        mimeType: 'image/png',
+        data: image.toString('base64'),
+      }],
+      data: {
+        path: path.join(workspaceRoot, 'preview.png'),
+        bytes: image.byteLength,
+        mimeType: 'image/png',
+      },
+    })
+  })
+
+  it('reports a recoverable view_image failure when the current model is text-only', async () => {
+    const image = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+      'base64',
+    )
+    await writeFile(path.join(workspaceRoot, 'text-only-preview.png'), image)
+    const viewer = new ViewImageTool()
+
+    const result = await viewer.execute({ path: 'text-only-preview.png' }, {
+      workspaceRoot,
+      modelProvider: 'glm',
+      modelName: 'glm-5.3',
+      modelCapabilities: {
+        streaming: true,
+        tools: true,
+        vision: false,
+        jsonMode: true,
+        systemPrompt: true,
+      },
+    })
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: expect.stringContaining('glm/glm-5.3 does not support vision input'),
+      data: {
+        code: 'VISION_UNSUPPORTED',
+        path: path.join(workspaceRoot, 'text-only-preview.png'),
+        bytes: image.byteLength,
+        mimeType: 'image/png',
+      },
+    })
+    expect(result).not.toHaveProperty('contentParts')
+  })
+
+  it('enforces workspace and format boundaries when viewing images', async () => {
+    const viewer = new ViewImageTool()
+    await writeFile(path.join(workspaceRoot, 'not-an-image.png'), 'plain text')
+
+    await expect(viewer.execute({ path: '../outside.png' }, { workspaceRoot }))
+      .rejects.toMatchObject({ code: 'PATH_OUTSIDE_WORKSPACE' })
+    await expect(viewer.execute({ path: 'not-an-image.png' }, { workspaceRoot }))
+      .rejects.toMatchObject({ code: 'UNSUPPORTED_IMAGE_FORMAT' })
   })
 
   it('runs terminal commands with argument arrays', async () => {
@@ -92,6 +226,35 @@ describe('ekko-agent tools', () => {
         exitCode: 0,
       },
     })
+  })
+
+  it('defaults command temporary files to the current workspace', async () => {
+    const terminal = new TerminalExecTool()
+    const result = await terminal.execute({
+      command: process.execPath,
+      args: ['-e', 'process.stdout.write(JSON.stringify({ TMPDIR: process.env.TMPDIR, TMP: process.env.TMP, TEMP: process.env.TEMP }))'],
+    }, { workspaceRoot })
+    const expected = path.join(workspaceRoot, '.ekko-tmp')
+
+    expect(result.ok).toBe(true)
+    expect(JSON.parse(result.content)).toEqual({ TMPDIR: expected, TMP: expected, TEMP: expected })
+    expect((await stat(expected)).isDirectory()).toBe(true)
+  })
+
+  it('allows an explicit terminal working directory outside workspaceRoot', async () => {
+    const terminal = new TerminalExecTool()
+    const cwd = os.tmpdir()
+
+    const result = await terminal.execute({
+      command: process.execPath,
+      args: ['-e', 'process.stdout.write(process.cwd())'],
+      cwd,
+    }, { workspaceRoot })
+    expect(result).toMatchObject({
+      ok: true,
+      data: { cwd },
+    })
+    expect(await realpath(result.content)).toBe(await realpath(cwd))
   })
 
   it('normalizes shell-like terminal command strings when args are omitted', async () => {
@@ -167,11 +330,13 @@ describe('ekko-agent tools', () => {
       'skill_list',
       'skill_view',
       'terminal_exec',
+      'view_image',
       'write_file',
     ])
     const definitionsByName = new Map(definitions.map(definition => [definition.name, definition]))
     expect(definitionsByName.get('code_exec')?.description).toContain('including a one-line snippet')
     expect(definitionsByName.get('terminal_exec')?.description).toContain('use code_exec instead')
+    expect(definitionsByName.get('terminal_exec')?.description).toContain('npx --dir')
     for (const definition of definitions) {
       expect(definition.description, definition.name).not.toMatch(/[\p{Script=Han}]/u)
       for (const description of collectDescriptions(definition.parameters)) {
@@ -190,6 +355,26 @@ describe('ekko-agent tools', () => {
       ok: true,
       content: 'ok',
     })
+  })
+
+  it('describes Windows-native terminal commands without Unix defaults', () => {
+    const definition = new TerminalExecTool({ platform: 'win32' }).definition
+
+    expect(definition.description).toContain('This runtime is Windows')
+    expect(definition.description).toContain('Do not use Unix-only commands')
+    expect(definition.description).toContain('cmd.exe')
+    expect(definition.description).toContain('.cmd or .bat launchers')
+    expect(definition.description).toContain('powershell.exe')
+    expect(definition.parameters.properties?.command?.description).toContain('git.exe')
+  })
+
+  it('describes macOS terminal semantics separately from Windows', () => {
+    const definition = new TerminalExecTool({ platform: 'darwin' }).definition
+
+    expect(definition.description).toContain('This runtime is macOS')
+    expect(definition.description).toContain('BSD rather than GNU')
+    expect(definition.description).toContain('sh or zsh')
+    expect(definition.description).not.toContain('generate Windows-native commands')
   })
 
   it('delegates foreground and background tasks through the runtime callback', async () => {

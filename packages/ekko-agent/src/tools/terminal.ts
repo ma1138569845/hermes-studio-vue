@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process'
+import { resolve } from 'node:path'
 import type { AgentTool, AgentToolContext, AgentToolResult } from './types'
-import { resolveToolPath } from './path-safety'
+import { ensureWorkspaceTempRoot, workspaceTempEnvironment } from './workspace-temp'
 
 export interface TerminalExecInput extends Record<string, unknown> {
   command: string
@@ -9,33 +10,27 @@ export interface TerminalExecInput extends Record<string, unknown> {
   timeoutMs?: number
 }
 
+export interface TerminalExecToolOptions {
+  timeoutMs?: number
+  platform?: NodeJS.Platform
+}
+
 export class TerminalExecTool implements AgentTool<TerminalExecInput> {
-  readonly definition = {
-    name: 'terminal_exec',
-    description: [
-      'Run a CLI command, project script, test, build, package manager, or system executable.',
-      'Prefer command as the executable and args as the argument array; shell string execution is not used.',
-      'When the user asks to execute or evaluate Node.js, JavaScript, or Python source code, use code_exec instead, even for a one-line snippet.',
-      'Destructive, privileged, remote-shell, publishing, and other dangerous commands require runtime authorization before execution.',
-    ].join(' '),
-    parameters: {
-      type: 'object',
-      properties: {
-        command: { type: 'string', description: 'Executable command to run. Prefer a bare executable such as "node", "ls", or "/bin/sh".' },
-        args: { type: 'array', items: { type: 'string' }, description: 'Command arguments.' },
-        cwd: { type: 'string', description: 'Working directory relative to the workspace.' },
-        timeoutMs: { type: 'number', description: 'Timeout in milliseconds.' },
-      },
-      required: ['command'],
-      additionalProperties: false,
-    },
+  readonly definition: AgentTool['definition']
+
+  private readonly timeoutMs: number
+
+  constructor(options: TerminalExecToolOptions = {}) {
+    this.timeoutMs = positiveInteger(options.timeoutMs, 30_000)
+    this.definition = terminalExecDefinition(options.platform ?? process.platform)
   }
 
   async execute(input: TerminalExecInput, context: AgentToolContext = {}): Promise<AgentToolResult> {
     const normalized = normalizeTerminalCommand(input.command, input.args)
     const args = normalized.args
-    const cwd = input.cwd ? resolveToolPath(input.cwd, context) : context.cwd || context.workspaceRoot || process.cwd()
-    const timeoutMs = input.timeoutMs ?? context.timeoutMs ?? 30_000
+    const baseDirectory = context.cwd || context.workspaceRoot || process.cwd()
+    const cwd = input.cwd ? resolve(baseDirectory, input.cwd) : baseDirectory
+    const timeoutMs = input.timeoutMs ?? context.timeoutMs ?? this.timeoutMs
     if (context.signal?.aborted) {
       return {
         ok: false,
@@ -45,9 +40,14 @@ export class TerminalExecTool implements AgentTool<TerminalExecInput> {
       }
     }
 
-    return new Promise<AgentToolResult>((resolve) => {
+    const tempDirectory = await ensureWorkspaceTempRoot(context)
+    return new Promise<AgentToolResult>((resolveResult) => {
       const child = spawn(normalized.command, args, {
         cwd,
+        env: {
+          ...process.env,
+          ...workspaceTempEnvironment(tempDirectory),
+        },
         shell: false,
         windowsHide: true,
       })
@@ -73,7 +73,7 @@ export class TerminalExecTool implements AgentTool<TerminalExecInput> {
       child.on('error', error => {
         clearTimeout(timer)
         context.signal?.removeEventListener('abort', onAbort)
-        resolve({
+        resolveResult({
           ok: false,
           content: error.message,
           error: error.message,
@@ -84,7 +84,7 @@ export class TerminalExecTool implements AgentTool<TerminalExecInput> {
         clearTimeout(timer)
         context.signal?.removeEventListener('abort', onAbort)
         const content = [stdout.trimEnd(), stderr.trimEnd()].filter(Boolean).join('\n')
-        resolve({
+        resolveResult({
           ok: code === 0 && !timedOut && !aborted,
           content: content || (aborted ? 'Command aborted.' : content),
           error: aborted ? 'Command aborted.' : timedOut ? `Command timed out after ${timeoutMs}ms` : code === 0 ? undefined : `Command exited with code ${code}`,
@@ -98,6 +98,7 @@ export class TerminalExecTool implements AgentTool<TerminalExecInput> {
             stderr,
             timedOut,
             aborted,
+            tempDirectory,
           },
         })
       })
@@ -105,8 +106,62 @@ export class TerminalExecTool implements AgentTool<TerminalExecInput> {
   }
 }
 
-export function createTerminalTools(): AgentTool[] {
-  return [new TerminalExecTool()]
+function terminalExecDefinition(platform: NodeJS.Platform): AgentTool['definition'] {
+  const windows = platform === 'win32'
+  const platformGuidance = windows
+    ? [
+        'This runtime is Windows: generate Windows-native commands.',
+        'Do not use Unix-only commands such as sh, bash, ls, cat, grep, sed, awk, head, tail, which, or /bin/sh unless their availability was already established.',
+        'Run native executables directly. For cmd built-ins, compound syntax, and .cmd or .bat launchers, explicitly invoke cmd.exe; for PowerShell syntax, explicitly invoke powershell.exe or pwsh.exe.',
+      ]
+    : platform === 'darwin'
+      ? [
+          'This runtime is macOS: generate macOS-native commands and remember that system utilities use BSD rather than GNU semantics.',
+          'Run normal executables directly. Invoke sh or zsh explicitly only for shell syntax.',
+        ]
+      : [
+          `This runtime is ${platform === 'linux' ? 'Linux' : platform}: generate native commands for this platform.`,
+          'Run normal executables directly. Invoke sh or bash explicitly only for shell syntax.',
+        ]
+
+  return {
+    name: 'terminal_exec',
+    description: [
+      'Run a CLI command, project script, test, build, package manager, or system executable.',
+      'Prefer command as the executable and args as the argument array; shell string execution is not used.',
+      ...platformGuidance,
+      windows
+        ? 'Commands are not confined to the workspace: explicit absolute Windows paths and package-manager forms such as npx --dir are supported.'
+        : 'Commands are not confined to the workspace: explicit absolute paths and package-manager forms such as npx --dir are supported.',
+      'Keep downloads, clones, extracted files, and generated intermediates under the current workspace (prefer .ekko-tmp) when workspace tools need to inspect them.',
+      'When the user asks to execute or evaluate Node.js, JavaScript, or Python source code, use code_exec instead, even for a one-line snippet.',
+      'Destructive, privileged, remote-shell, publishing, and other dangerous commands require runtime authorization before execution.',
+    ].join(' '),
+    parameters: {
+      type: 'object',
+      properties: {
+        command: {
+          type: 'string',
+          description: windows
+            ? 'Executable command to run, such as git.exe, cmd.exe, or powershell.exe. Do not place a whole shell command line here.'
+            : 'Executable command to run. Prefer a bare executable such as git, ls, or /bin/sh.',
+        },
+        args: { type: 'array', items: { type: 'string' }, description: 'Command arguments.' },
+        cwd: { type: 'string', description: 'Working directory. Relative paths resolve from the current workspace; explicit absolute system paths are supported.' },
+        timeoutMs: { type: 'number', description: 'Timeout in milliseconds.' },
+      },
+      required: ['command'],
+      additionalProperties: false,
+    },
+  }
+}
+
+export function createTerminalTools(options: TerminalExecToolOptions = {}): AgentTool[] {
+  return [new TerminalExecTool(options)]
+}
+
+function positiveInteger(value: number | undefined, fallback: number): number {
+  return Number.isFinite(value) && Number(value) > 0 ? Math.floor(Number(value)) : fallback
 }
 
 function normalizeTerminalCommand(command: string, args?: string[]): { command: string; args: string[] } {

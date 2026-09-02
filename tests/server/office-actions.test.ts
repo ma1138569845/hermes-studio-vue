@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import * as officeActions from '../../packages/server/src/services/hermes/office-actions'
+import * as officeActions from '../../packages/server/src/modules/studio/services/office-actions'
 
 afterEach(() => {
   // 队列是进程级状态，每个用例前清空并归零统计，保证隔离。
