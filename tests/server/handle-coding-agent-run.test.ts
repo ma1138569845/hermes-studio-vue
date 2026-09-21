@@ -14,6 +14,7 @@ const getSessionMock = vi.hoisted(() => vi.fn())
 const updateSessionMock = vi.hoisted(() => vi.fn())
 const handleCodingAgentSessionCommandMock = vi.hoisted(() => vi.fn(async () => undefined))
 const parseCodingAgentSessionCommandMock = vi.hoisted(() => vi.fn())
+const resolveAuthorizedProviderRuntimeCredentialsMock = vi.hoisted(() => vi.fn())
 
 vi.mock('../../packages/server/src/modules/coding-agents/services/runtime/run-manager', () => ({
   codingAgentRunManager: managerMock,
@@ -30,6 +31,7 @@ vi.mock('../../packages/server/src/modules/studio/services/chat-run/model-run-pr
 
 vi.mock('../../packages/server/src/modules/studio/public/runs/prompt', () => ({
   getSystemPrompt: getSystemPromptMock,
+  studioMcpUsageGuidelines: vi.fn(() => ''),
 }))
 
 vi.mock('../../packages/server/src/modules/studio/repositories/session-store', () => ({
@@ -41,12 +43,18 @@ vi.mock('../../packages/server/src/modules/studio/public/logging', () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }))
 
+vi.mock('../../packages/server/src/modules/studio/public/authorized-provider-runtime', () => ({
+  resolveAuthorizedProviderRuntimeCredentials: resolveAuthorizedProviderRuntimeCredentialsMock,
+}))
+
 vi.mock('../../packages/server/src/modules/coding-agents/services/session-command', () => ({
   handleCodingAgentSessionCommand: handleCodingAgentSessionCommandMock,
   parseCodingAgentSessionCommand: parseCodingAgentSessionCommandMock,
 }))
 
 vi.mock('../../packages/server/src/modules/studio/public/chat-agent-runtime', () => ({
+  getChatCodingAgentMcpServers: vi.fn(() => ({ 'ekko-studio-interaction': { command: 'studio' }, 'ekko-studio-use': { command: 'studio' } })),
+  resolveChatEkkoMcpServers: vi.fn(() => ({ 'ekko-studio-use': { command: 'studio' } })),
   chatCodingAgentRunManager: managerMock,
   startChatCodingAgentRun: startCodingAgentRunMock,
   sendChatCodingAgentRunInput: sendCodingAgentRunInputMock,
@@ -62,6 +70,69 @@ describe('handleCodingAgentRun', () => {
     writeModelRunProfileTokenMock.mockResolvedValue(undefined)
     getSystemPromptMock.mockReturnValue('system prompt')
     parseCodingAgentSessionCommandMock.mockReturnValue(null)
+    resolveAuthorizedProviderRuntimeCredentialsMock.mockResolvedValue({
+      apiKey: 'studio-claude-oauth-access-token',
+    })
+  })
+
+  it('runs global Claude Code without requiring Studio OAuth credentials', async () => {
+    resolveAuthorizedProviderRuntimeCredentialsMock.mockRejectedValue(new Error('Studio OAuth is not configured'))
+    managerMock.runIdForSession.mockReturnValue('agent-session-1')
+    managerMock.isSessionLaunchCompatible.mockReturnValue(true)
+    sendCodingAgentRunInputMock.mockResolvedValue({ runId: 'agent-session-1' })
+
+    const { handleCodingAgentRun } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-coding-agent-run')
+    const state = {
+      messages: [],
+      isWorking: false,
+      isAborting: false,
+      events: [],
+      queue: [],
+    }
+    const sessionMap = new Map([['session-1', state]])
+    const socket = {
+      join: vi.fn(),
+      emit: vi.fn(),
+    }
+
+    await handleCodingAgentRun({} as any, socket as any, {
+      session_id: 'session-1',
+      input: 'hello claude',
+      coding_agent_id: 'claude-code',
+      mode: 'global',
+    }, 'default', sessionMap as any)
+
+    expect(resolveAuthorizedProviderRuntimeCredentialsMock).not.toHaveBeenCalled()
+    expect(sendCodingAgentRunInputMock).toHaveBeenCalledWith(
+      'session-1',
+      'hello claude',
+      'system prompt',
+    )
+  })
+
+  it('sends a fresh task context on each turn while storing the original user message', async () => {
+    managerMock.runIdForSession.mockReturnValue('reused-runtime')
+    managerMock.isSessionLaunchCompatible.mockReturnValue(true)
+    sendCodingAgentRunInputMock.mockResolvedValue({ runId: 'reused-runtime' })
+    const { handleCodingAgentRun } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-coding-agent-run')
+    const state = { messages: [], isWorking: false, events: [], queue: [] }
+    const sessions = new Map([['session-1', state]])
+    const socket = { join: vi.fn(), emit: vi.fn() }
+    for (const context of ['first-turn', 'second-turn']) {
+      await handleCodingAgentRun({} as any, socket as any, {
+        session_id: 'session-1', coding_agent_id: 'codex', mode: 'global', input: 'Show a task card', task_plan_context_id: context, interaction_context_id: context,
+      }, 'default', sessions as any)
+    }
+    const calls = sendCodingAgentRunInputMock.mock.calls
+    expect(calls[0][1]).toContain('context_id="first-turn"')
+    expect(calls[1][1]).toContain('context_id="second-turn"')
+    expect(calls[1][1]).not.toContain('first-turn')
+    for (const args of calls) {
+      expect(args[1]).toContain('ekko_studio_clarify')
+      expect(args[1]).toContain('<studio_interaction_context>')
+      expect(args[2]).not.toContain('context_id=')
+      expect(args[4]).toBe('Show a task card')
+    }
   })
 
   it('restarts an existing coding-agent runner when the requested launch mode changes', async () => {
@@ -359,8 +430,8 @@ describe('handleCodingAgentRun', () => {
     writeModelRunProfileTokenMock.mockResolvedValue(undefined)
     getSystemPromptMock.mockReturnValue([
       'system prompt',
-      'DechnicAuditor MCP usage: call hermes_studio_api_openapi_get before calling unfamiliar Web UI endpoints.',
-      'Use hermes_studio_api_request with method, relative path, and JSON body/query fields.',
+      'DechnicAuditor MCP usage: call ekko_studio_api_openapi_get before calling unfamiliar Web UI endpoints.',
+      'Use ekko_studio_api_request with method, relative path, and JSON body/query fields.',
     ].join('\n'))
 
     const { handleCodingAgentRun } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-coding-agent-run')
@@ -394,7 +465,7 @@ describe('handleCodingAgentRun', () => {
       expect.stringContaining('system prompt\nDechnicAuditor MCP usage'),
     )
     const prompt = sendCodingAgentRunInputMock.mock.calls.at(-1)?.[2]
-    expect(prompt).toContain('hermes_studio_api_request')
+    expect(prompt).toContain('ekko_studio_api_request')
     expect(prompt).not.toContain('run-token')
     expect(prompt).not.toContain('[Current Hermes profile:')
     expect(prompt).not.toContain('Current Hermes Web UI model run token')
@@ -433,4 +504,27 @@ describe('handleCodingAgentRun', () => {
     expect(sendCodingAgentRunInputMock).not.toHaveBeenCalled()
     expect(startCodingAgentRunMock).not.toHaveBeenCalled()
   })
+
+  it('drops task and clarification instructions after disabling MCP on a reused session', async () => {
+    const { getChatCodingAgentMcpServers } = await import('../../packages/server/src/modules/studio/public/chat-agent-runtime')
+    const { handleCodingAgentRun } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-coding-agent-run')
+    managerMock.runIdForSession.mockReturnValue('reused-runtime')
+    managerMock.isSessionLaunchCompatible.mockReturnValue(true)
+    const sessions = new Map([['session-1', { messages: [], events: [], queue: [], isWorking: false }]])
+    const socket = { join: vi.fn(), emit: vi.fn() }
+    for (const enabled of [true, false]) {
+      vi.mocked(getChatCodingAgentMcpServers).mockReturnValueOnce({ 'ekko-studio-interaction': { enabled } })
+      await handleCodingAgentRun({} as any, socket as any, {
+        session_id: 'session-1', coding_agent_id: 'codex', input: 'Do work',
+        task_plan_context_id: 'plan-context', interaction_context_id: 'clarify-context',
+      }, 'research', sessions as any)
+    }
+    expect(sendCodingAgentRunInputMock.mock.calls[0][1]).toContain('ekko_studio_update_plan')
+    expect(sendCodingAgentRunInputMock.mock.calls[1][1]).toBe('Do work')
+    expect(getSystemPromptMock).toHaveBeenLastCalledWith(undefined, expect.objectContaining({
+      mcpCapabilities: expect.objectContaining({ interaction: false }),
+    }))
+    expect(startCodingAgentRunMock).not.toHaveBeenCalled()
+  })
+
 })

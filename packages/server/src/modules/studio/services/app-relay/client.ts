@@ -36,9 +36,19 @@ const ALLOWED_REQUEST_HEADERS = new Set([
   'range',
   'x-hermes-profile',
   'x-request-id',
+  'x-app-access-token',
+  'x-session-share-token',
+  'x-group-agent-request-secret',
+  'x-expected-sha256',
 ])
-const ALLOWED_SOCKET_NAMESPACES = new Set(['/chat-run', '/group-chat', '/workflow'])
+const ALLOWED_TERMINAL_CLIENT_EVENTS = new Set(['terminal.capabilities', 'terminal.list', 'terminal.create', 'terminal.attach', 'terminal.read', 'terminal.input', 'terminal.resize', 'terminal.detach', 'terminal.close'])
+const ALLOWED_SOCKET_NAMESPACES = new Set(['/terminal', '/chat-run', '/group-chat', '/workflow', '/group-chat-agent-relay'])
+const ALLOWED_GROUP_AGENT_CLIENT_EVENTS = new Set([
+  'run.accepted', 'run.completed', 'run.failed', 'agent.event', 'agent.events', 'agent.config.update', 'attachment.read', 'connector.revoke',
+])
 const ALLOWED_CHAT_RUN_CLIENT_EVENTS = new Set([
+  'app.events.subscribe',
+  'app.events.unsubscribe',
   'run',
   'resume',
   'app.resume',
@@ -47,10 +57,15 @@ const ALLOWED_CHAT_RUN_CLIENT_EVENTS = new Set([
   'cancel_queued_run',
   'approval.respond',
   'clarify.respond',
+  'calendar.respond',
+  'reminder.respond',
+  'location.respond',
+  'health.respond',
 ])
 const ALLOWED_GROUP_CHAT_CLIENT_EVENTS = new Set([
   'join',
   'load_pending_approvals',
+  'load_room_agent_activities',
   'load_messages',
   'update_member_profile',
   'message',
@@ -186,6 +201,16 @@ export interface CloudAppPreconnection {
   refreshRemaining: number
 }
 
+export interface CloudAppAccessFailure {
+  code: string
+  deviceCode: string
+  deviceName: string
+  cloudUserId: number
+  connectionType: 'cloud'
+  plan: string
+  occurredAt: number
+}
+
 interface LocalSocketBridge {
   id: string
   namespace: string
@@ -214,6 +239,7 @@ export class AppRelayClient {
     preconnection: CloudAppPreconnection
   }>()
   private readonly cloudConnectionOnline = new Map<string, boolean>()
+  private latestAccessFailure: CloudAppAccessFailure | null = null
   private readonly downloadSessions = new RelayDownloadSessions()
   private preconnectionExpired = false
   private cloudMediaMaxBytes = DEFAULT_CLOUD_MEDIA_MAX_BYTES
@@ -288,6 +314,10 @@ export class AppRelayClient {
     this.socket.on('connection.activated', (payload: Record<string, unknown> = {}) => {
       const preconnectId = String(payload.preconnectId || payload.preconnect_id || '').trim()
       if (preconnectId) this.pendingPreconnections.delete(preconnectId)
+      this.clearAccessFailure(payload)
+    })
+    this.socket.on('connection.access.failed', (payload: Record<string, unknown> = {}) => {
+      this.rememberAccessFailure(payload)
     })
     this.socket.on('connection.snapshot', (payload: Record<string, unknown> = {}) => {
       this.rememberConnectionSnapshot(payload)
@@ -332,7 +362,8 @@ export class AppRelayClient {
       void this.emitLocalSocketEvent(request).then(response => ack?.(response))
     })
     this.socket.on('app.socket.close', (request: AppRelaySocketCloseRequest, ack?: (response: AppRelaySocketResponse) => void) => {
-      ack?.(this.closeLocalSocket(request))
+      const response = this.closeLocalSocket(request)
+      ack?.(response)
     })
   }
 
@@ -467,6 +498,12 @@ export class AppRelayClient {
       .some(([key, online]) => key.startsWith(prefix) && online)
   }
 
+  getLatestAccessFailure(now = Date.now()): CloudAppAccessFailure | null {
+    const failure = this.latestAccessFailure
+    if (!failure || now - failure.occurredAt > 30 * 60 * 1000) return null
+    return { ...failure }
+  }
+
   waitForConnected(timeoutMs = 5000): Promise<boolean> {
     const socket = this.socket
     if (!socket) return Promise.resolve(false)
@@ -590,7 +627,18 @@ export class AppRelayClient {
     localSocket.on('connect_error', (err: Error) => this.emitSocketEvent(bridge, 'connect_error', { message: err.message }))
     localSocket.on('disconnect', (reason: string) => this.emitSocketEvent(bridge, 'disconnect', { reason }))
     localSocket.onAny((event: string, ...args: unknown[]) => {
-      this.handleLocalSocketEvent(bridge, event, args.length <= 1 ? args[0] : args)
+      // Agent relay events carry one payload. Socket.IO recovery appends an
+      // offset argument which belongs to this local connection, not the relay.
+      const payload = namespace === '/group-chat-agent-relay' ? args[0] : args.length <= 1 ? args[0] : args
+      if (namespace === '/group-chat-agent-relay' && typeof args.at(-1) === 'function') {
+        const ack = args.pop() as (response: unknown) => void
+        if (!this.socket?.connected) { ack({ error: 'Agent relay is disconnected' }); return }
+        this.socket.timeout(330_000).emit('app.socket.event', {
+          id, namespace, event, payload,
+        }, (error: Error | null, response: unknown) => ack(error ? { error: 'Agent response timed out' } : response))
+        return
+      }
+      this.handleLocalSocketEvent(bridge, event, payload)
     })
     return { id, ok: true, namespace, stream: bridge.stream }
   }
@@ -792,6 +840,41 @@ export class AppRelayClient {
       if (deviceCode && cloudUserId) {
         this.cloudConnectionOnline.set(cloudConnectionKey(deviceCode, cloudUserId), Boolean(connection.online))
       }
+    }
+  }
+
+  private rememberAccessFailure(payload: Record<string, unknown>): void {
+    const machineId = String(payload.machineId || payload.machine_id || '').trim()
+    const code = String(payload.code || payload.reason || '').trim()
+    if (machineId !== this.options.machineId || ![
+      'cloud_subscription_required',
+      'paid_account_required',
+      'app_access_expired',
+    ].includes(code)) return
+    const occurredAt = Number(payload.occurredAt || payload.occurred_at)
+    const plan = String(payload.plan || '').trim()
+    this.latestAccessFailure = {
+      code,
+      deviceCode: String(payload.deviceCode || payload.device_code || '').trim().slice(0, 255),
+      deviceName: String(payload.deviceName || payload.device_name || '').trim().slice(0, 255),
+      cloudUserId: normalizeCloudUserId(
+        payload.appUserId || payload.app_user_id || payload.userId || payload.user_id,
+      ),
+      connectionType: 'cloud',
+      plan: ['internal', 'public_beta', 'paid'].includes(plan) ? plan : 'unknown',
+      occurredAt: Number.isFinite(occurredAt) && occurredAt > 0 ? occurredAt : Date.now(),
+    }
+  }
+
+  private clearAccessFailure(payload: Record<string, unknown>): void {
+    const failure = this.latestAccessFailure
+    if (!failure) return
+    const deviceCode = String(payload.deviceCode || payload.device_code || '').trim()
+    const cloudUserId = normalizeCloudUserId(
+      payload.appUserId || payload.app_user_id || payload.userId || payload.user_id,
+    )
+    if (failure.deviceCode === deviceCode && (!failure.cloudUserId || failure.cloudUserId === cloudUserId)) {
+      this.latestAccessFailure = null
     }
   }
 
@@ -1122,6 +1205,8 @@ function isMediaHttpRequest(request: AppRelayHttpRequest): boolean {
 }
 
 function isAllowedSocketEvent(namespace: string, event: string): boolean {
+  if (namespace === '/terminal') return ALLOWED_TERMINAL_CLIENT_EVENTS.has(event)
+  if (namespace === '/group-chat-agent-relay') return ALLOWED_GROUP_AGENT_CLIENT_EVENTS.has(event)
   if (namespace === '/chat-run') return ALLOWED_CHAT_RUN_CLIENT_EVENTS.has(event)
   if (namespace === '/group-chat') return ALLOWED_GROUP_CHAT_CLIENT_EVENTS.has(event)
   if (namespace === '/workflow') return ALLOWED_WORKFLOW_CLIENT_EVENTS.has(event)

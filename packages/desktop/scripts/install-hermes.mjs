@@ -338,13 +338,19 @@ function extractChromeForTestingArchive(url, zipPath, extractDir) {
       'import zipfile',
       'url, zip_path, extract_dir = sys.argv[1:4]',
       'urllib.request.urlretrieve(url, zip_path)',
-      'with zipfile.ZipFile(zip_path) as archive:',
-      '    archive.extractall(extract_dir)',
+      'if sys.platform == "win32":',
+      '    with zipfile.ZipFile(zip_path) as archive:',
+      '        archive.extractall(extract_dir)',
     ].join('\n'),
     url,
     zipPath,
     extractDir,
   ])
+  if (TARGET_OS !== 'win32') {
+    // zipfile.extractall drops Unix executable modes and symbolic links.
+    // Chrome's executable and framework layout must survive relocation.
+    run('unzip', ['-q', zipPath, '-d', extractDir])
+  }
 }
 
 function extractedChromeBundleDir(extractDir) {
@@ -485,6 +491,10 @@ function installBrowserRuntime() {
     process.exit(1)
   }
   console.log(`✓ bundled Chrome executable available at ${browserExecutable}`)
+  if (TARGET_OS !== 'win32') {
+    // File-existence checks alone also accept a non-executable Chrome binary.
+    run(browserExecutable, ['--version'])
+  }
 }
 
 function buildHermesFrontends() {
@@ -626,9 +636,11 @@ if (!SKIP_BROWSER_RUNTIME) {
   run(pyBin, [
     '-c',
     [
-      'import os, shutil',
+      'import importlib, importlib.util, os, shutil',
       `os.environ["PLAYWRIGHT_BROWSERS_PATH"] = ${JSON.stringify(PLAYWRIGHT_BROWSERS_PATH)}`,
-      'from tools.browser_tool import _chromium_installed',
+      // Hermes 0.21.3 moved browser installation checks into a separate module.
+      'module = "tools.browser_tool_install" if importlib.util.find_spec("tools.browser_tool_install") else "tools.browser_tool"',
+      '_chromium_installed = importlib.import_module(module)._chromium_installed',
       'assert shutil.which("agent-browser") is not None',
       'assert _chromium_installed()',
     ].join('; '),

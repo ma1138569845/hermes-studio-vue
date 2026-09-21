@@ -15,7 +15,7 @@ describe('Ekko configuration navigation', () => {
     expect(app).toContain('route.meta?.ekkoConfig === true')
     expect(app).toContain('v-if="!isLoginPage && usesEkkoConfigSidebar"')
     expect(app).toContain("'has-ekko-config-sidebar': usesEkkoConfigSidebar")
-    expect(app).toContain('.no-sidebar:not(.has-hermes-config-sidebar):not(.has-ekko-config-sidebar) &')
+    expect(app).toContain('.no-sidebar:not(.has-hermes-config-sidebar):not(.has-ekko-config-sidebar):not(.has-coding-agent-config-sidebar) &')
 
     for (const [path, name] of [
       ['/ekko/memory', 'ekko.memory'],
@@ -89,7 +89,7 @@ describe('Ekko configuration navigation', () => {
     expect(skills).toContain("@/components/hermes/skills/SkillImportModal.vue")
     expect(skills).toContain("@/components/hermes/skills/SkillExternalDirsModal.vue")
     expect(skills).toContain('<SkillSourceLegend v-model="sourceFilter" />')
-    expect(hermesSkills).toContain('<SkillSourceLegend v-model="sourceFilter" />')
+    expect(hermesSkills).toContain('<SkillSourceLegend v-model="sourceFilter" :show-hub="isHermesTarget" />')
     for (const source of ['builtin', 'hub', 'local', 'external', 'modified']) {
       expect(sourceLegend).toContain(`toggle('${source}')`)
     }

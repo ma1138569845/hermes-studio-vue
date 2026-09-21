@@ -16,6 +16,7 @@ import { useFilesStore } from "@/stores/hermes/files";
 import { useToolPanelStore } from "@/stores/hermes/tool-panel";
 import { useSettingsStore } from "@/stores/hermes/settings";
 import { chatSessionAgentAvatar, type ChatAgentAvatar } from "@/utils/chat-agent-avatar";
+import TaskPlanCard from './TaskPlanCard.vue';
 import ToolChangeCard from "./ToolChangeCard.vue";
 import {
   copyTextToClipboard,
@@ -33,6 +34,7 @@ import type { WorkspaceRunChangeSummary } from "@/api/studio/sessions";
 import { isServerTtsProvider } from "@/api/studio/tts";
 import type { ProfileAvatar as ProfileAvatarData } from "@/api/hermes/profiles";
 import ProfileAvatar from "@/components/hermes/profiles/ProfileAvatar.vue";
+import ImagePreviewOverlay from "./ImagePreviewOverlay.vue";
 
 const MarkdownRenderer = defineAsyncComponent(async () => (await import("./MarkdownRenderer.vue")).default);
 
@@ -777,6 +779,7 @@ function handleSpeechToggle() {
       model: voiceSettings.doubaoModel.value,
       voice: voiceSettings.doubaoVoice.value,
       stylePrompt: voiceSettings.doubaoStylePrompt.value || undefined,
+      speed: voiceSettings.doubaoSpeed.value || undefined,
     })
     return
   }
@@ -858,6 +861,7 @@ onMounted(() => {
           model: voiceSettings.doubaoModel.value,
           voice: voiceSettings.doubaoVoice.value,
           stylePrompt: voiceSettings.doubaoStylePrompt.value || undefined,
+          speed: voiceSettings.doubaoSpeed.value || undefined,
         }).catch(handleAutoplayTtsError)
       } else if (isServerTtsProvider(voiceSettings.provider.value)) {
         void speech.openaiPlay(props.message.id, content, {
@@ -896,7 +900,8 @@ onBeforeUnmount(() => {
     :class="[message.role, { highlight }]"
     :id="`message-${message.id}`"
   >
-    <template v-if="message.role === 'tool'">
+    <TaskPlanCard v-if="message.taskPlan" :plan="message.taskPlan" />
+    <template v-else-if="message.role === 'tool'">
       <div
         class="tool-line"
         :class="{ expandable: hasInlineToolDetails || isSubagentTool, 'subagent-entry': isSubagentTool }"
@@ -1312,11 +1317,12 @@ onBeforeUnmount(() => {
       </div>
     </template>
   </div>
-  <Teleport to="body">
-    <div v-if="previewUrl" class="image-preview-overlay" @click.self="previewUrl = null">
-      <img :src="previewUrl" class="image-preview-img" @click="previewUrl = null" />
-    </div>
-  </Teleport>
+  <ImagePreviewOverlay
+    v-if="previewUrl"
+    :src="previewUrl"
+    alt=""
+    @close="previewUrl = null"
+  />
 </template>
 
 <style scoped lang="scss">
@@ -2118,24 +2124,6 @@ onBeforeUnmount(() => {
     opacity: 1;
     transform: scale(1);
   }
-}
-
-.image-preview-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 9999;
-  background: rgba(0, 0, 0, 0.85);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-}
-
-.image-preview-img {
-  max-width: 90vw;
-  max-height: 90vh;
-  object-fit: contain;
-  border-radius: 4px;
 }
 
 @media (max-width: $breakpoint-mobile) {

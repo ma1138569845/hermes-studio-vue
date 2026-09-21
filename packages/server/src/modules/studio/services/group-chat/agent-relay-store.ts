@@ -5,22 +5,23 @@ export const GROUP_AGENT_PAIRING_REQUEST_TTL_MS = 10 * 60_000
 export const GROUP_AGENT_PAIRING_TICKET_TTL_MS = 2 * 60_000
 
 export type RemoteGroupAgentDescriptor = {
-  agent: 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok'
+  agent: 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | 'opencode' | 'dsh'
   agentMode: 'scoped' | 'global'
   profile: string
   provider: string
   model: string
   apiMode: string
+  agentPreset?: string
   reasoningEffort: string
   name: string
   description: string
   avatar: string
 }
 
-const REMOTE_AGENT_TYPES = new Set<RemoteGroupAgentDescriptor['agent']>(['hermes', 'ekko', 'codex', 'claude', 'pi', 'grok'])
+const REMOTE_AGENT_TYPES = new Set<RemoteGroupAgentDescriptor['agent']>(['hermes', 'ekko', 'codex', 'claude', 'pi', 'grok', 'opencode', 'dsh'])
 const REMOTE_AGENT_API_MODES = new Set(['', 'chat_completions', 'codex_responses', 'anthropic_messages'])
 const REMOTE_AGENT_REASONING_EFFORTS = new Set(['', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
-const REMOTE_GLOBAL_MODE_AGENTS = new Set<RemoteGroupAgentDescriptor['agent']>(['codex', 'claude', 'pi', 'grok'])
+const REMOTE_GLOBAL_MODE_AGENTS = new Set<RemoteGroupAgentDescriptor['agent']>(['codex', 'claude', 'pi', 'grok', 'opencode', 'dsh'])
 const PAIRING_AUDIT_RETENTION_MS = 7 * 24 * 60 * 60_000
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
@@ -30,14 +31,19 @@ function boundedText(value: unknown, maxLength: number, field: string, required 
   return text
 }
 
-export function normalizeRemoteGroupAgentDescriptor(value: unknown): RemoteGroupAgentDescriptor {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid remote Agent')
+export function normalizeRemoteGroupAgentDescriptor(
+  value: unknown,
+  source?: 'connection request' | 'relay confirmation',
+): RemoteGroupAgentDescriptor {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`Invalid remote Agent${source ? ` in ${source}` : ''}`)
+  }
   const input = value as Record<string, unknown>
   const agent = String(input.agent || 'hermes').trim() as RemoteGroupAgentDescriptor['agent']
   if (!REMOTE_AGENT_TYPES.has(agent)) throw new Error('Invalid remote Agent type')
   const agentMode = input.agentMode === 'global' ? 'global' : 'scoped'
   if (agentMode === 'global' && !REMOTE_GLOBAL_MODE_AGENTS.has(agent)) {
-    throw new Error('Remote Agent global mode is only available for Claude, Codex, Pi, and Grok')
+    throw new Error('Remote Agent global mode is only available for Claude, Codex, Pi, Grok, and OpenCode')
   }
   const profile = boundedText(input.profile, 120, 'profile', true)
   const name = boundedText(input.name || profile, 120, 'name', true)
@@ -68,6 +74,7 @@ export function normalizeRemoteGroupAgentDescriptor(value: unknown): RemoteGroup
     model: agentMode === 'global' ? '' : boundedText(input.model, 500, 'model'),
     apiMode,
     reasoningEffort,
+    agentPreset: boundedText(input.agentPreset, 200, 'agentPreset') || undefined,
     name,
     description: boundedText(input.description, 2_000, 'description'),
     avatar,

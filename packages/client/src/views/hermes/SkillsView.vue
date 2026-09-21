@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { NBadge, NButton, NDrawer, NDrawerContent, NInput } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import SkillList from '@/components/hermes/skills/SkillList.vue'
@@ -8,11 +8,19 @@ import SkillImportModal from '@/components/hermes/skills/SkillImportModal.vue'
 import SkillExternalDirsModal from '@/components/hermes/skills/SkillExternalDirsModal.vue'
 import SkillSourceLegend from '@/components/hermes/skills/SkillSourceLegend.vue'
 import PendingWriteApprovals from '@/components/hermes/skills/PendingWriteApprovals.vue'
-import { fetchSkills, type SkillCategory, type SkillSource, type SkillInfo, type SkillTarget } from '@/api/hermes/skills'
+import { deleteSkillApi, importSkill, fetchSkills, type SkillCategory, type SkillSource, type SkillInfo, type SkillTarget } from '@/api/hermes/skills'
 import { fetchPendingWrites } from '@/api/hermes/write-gate'
 import { useProfilesStore } from '@/stores/hermes/profiles'
 
 type SourceFilter = SkillSource | 'modified'
+
+const props = withDefaults(defineProps<{
+  target?: SkillTarget
+  embedded?: boolean
+}>(), {
+  target: 'hermes',
+  embedded: false,
+})
 
 const { t } = useI18n()
 const profilesStore = useProfilesStore()
@@ -24,7 +32,7 @@ const selectedSkill = ref('')
 const searchQuery = ref('')
 const showSidebar = ref(true)
 const sourceFilter = ref<SourceFilter | null>(null)
-const skillTarget = ref<SkillTarget>('hermes')
+const skillTarget = computed(() => props.target)
 const showImportModal = ref(false)
 const showExternalDirsModal = ref(false)
 const showWriteApprovalDrawer = ref(false)
@@ -44,6 +52,7 @@ const selectedSkillData = computed(() => {
 const isHermesTarget = computed(() => skillTarget.value === 'hermes')
 const selectedSkillReadonly = computed(() => {
   if (!selectedSkillData.value) return true
+  if (selectedSkillData.value.readonly) return true
   if (selectedCategory.value === '.archive') return true
   return (selectedSkillData.value.source || 'local') !== 'local'
 })
@@ -64,6 +73,12 @@ onUnmounted(() => {
   mobileQuery?.removeEventListener('change', handleMobileChange)
 })
 
+watch(() => props.target, () => {
+  selectedCategory.value = ''
+  selectedSkill.value = ''
+  loadSkills()
+})
+
 async function loadSkills() {
   loading.value = true
   try {
@@ -82,6 +97,7 @@ async function loadSkills() {
 }
 
 async function loadPendingWriteCount() {
+  if (!isHermesTarget.value) return
   try {
     const data = await fetchPendingWrites()
     writeApprovalSupported.value = data.supported !== false
@@ -148,7 +164,7 @@ function handleSkillSaved() {
 </script>
 
 <template>
-  <div class="skills-view">
+  <div class="skills-view" :class="{ embedded }">
     <header class="page-header">
       <div style="display: flex; align-items: center; gap: 8px;">
         <h2 class="header-title">{{ t('skills.title') }}</h2>
@@ -156,7 +172,7 @@ function handleSkillSaved() {
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
         </button>
       </div>
-      <SkillSourceLegend v-model="sourceFilter" />
+      <SkillSourceLegend v-model="sourceFilter" :show-hub="isHermesTarget" />
       <div class="header-actions">
         <NButton
           v-if="isHermesTarget && writeApprovalSupported"
@@ -179,7 +195,7 @@ function handleSkillSaved() {
           </span>
         </NButton>
         <NButton
-          v-if="isHermesTarget"
+          v-if="isHermesTarget || skillTarget === 'dsh'"
           class="header-action-btn"
           size="small"
           :title="t('skills.import')"
@@ -220,7 +236,13 @@ function handleSkillSaved() {
       </div>
     </header>
 
-    <SkillImportModal v-if="showImportModal" @close="showImportModal = false" @saved="handleImported" />
+    <SkillImportModal
+      v-if="showImportModal"
+      :allow-category="skillTarget !== 'dsh'"
+      :import-handler="skillTarget === 'dsh' ? (files) => importSkill(files, undefined, 'dsh') : undefined"
+      @close="showImportModal = false"
+      @saved="handleImported"
+    />
     <SkillExternalDirsModal v-if="showExternalDirsModal"
       @close="showExternalDirsModal = false" @saved="handleExternalDirsSaved" />
     <NDrawer
@@ -248,7 +270,9 @@ function handleSkillSaved() {
               :selected-skill="selectedCategory && selectedSkill ? `${selectedCategory}/${selectedSkill}` : null"
               :search-query="searchQuery"
               :source-filter="sourceFilter"
-              :readonly="!isHermesTarget"
+              :readonly="!isHermesTarget && skillTarget !== 'dsh'"
+              :toggleable="isHermesTarget"
+              :delete-handler="skillTarget === 'dsh' ? (category, name) => deleteSkillApi(category, name, 'dsh') : undefined"
               @select="handleSelect"
               @deleted="handleSkillDeleted"
             />
@@ -293,6 +317,13 @@ function handleSkillSaved() {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.skills-view.embedded {
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  background: transparent;
 }
 
 @media (max-width: $breakpoint-mobile) {

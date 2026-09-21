@@ -3,7 +3,7 @@
  * Uses the same ensureTable/getDb pattern as usage-store.ts.
  */
 import { isSqliteAvailable, getDb } from '../infrastructure/database'
-import { COMPRESSION_SNAPSHOT_TABLE, SESSIONS_TABLE, MESSAGES_TABLE } from '../infrastructure/database/schemas'
+import { TASK_PLANS_TABLE, COMPRESSION_SNAPSHOT_TABLE, SESSIONS_TABLE, MESSAGES_TABLE, SESSION_CATEGORIES_TABLE } from '../infrastructure/database/schemas'
 import { normalizeMessageContentForStorageRole } from './message-content'
 import { copyCompressionSnapshot } from './compression-snapshot'
 import { recordSkillUsageMessage } from './skill-usage-store'
@@ -15,6 +15,7 @@ export interface HermesSessionRow {
   source: string
   agent: string
   agent_mode: string
+  agent_preset: string
   agent_session_id: string
   agent_native_session_id: string
   user_id: string | null
@@ -42,6 +43,7 @@ export interface HermesSessionRow {
   preview: string
   last_active: number
   is_archived: number
+  is_pinned: number
   push_enabled: number
   workspace: string | null
   category_id: number | null
@@ -77,6 +79,10 @@ export interface HermesSessionSearchRow extends HermesSessionRow {
 }
 
 export interface SessionListOptions {
+  offset?: number
+  categoryId?: number | null
+  pinned?: boolean
+  includeSessionIds?: string[]
   sources?: string[]
   profiles?: string[]
   includeArchived?: boolean
@@ -117,6 +123,7 @@ function mapSessionRow(row: Record<string, unknown>): HermesSessionRow {
     source: String(row.source || 'api_server'),
     agent: String(row.agent || ''),
     agent_mode: String(row.agent_mode || ''),
+    agent_preset: String(row.agent_preset || ''),
     agent_session_id: String(row.agent_session_id || ''),
     agent_native_session_id: String(row.agent_native_session_id || ''),
     user_id: row.user_id != null ? String(row.user_id) : null,
@@ -144,6 +151,7 @@ function mapSessionRow(row: Record<string, unknown>): HermesSessionRow {
     preview: String(row.preview || ''),
     last_active: Number(row.last_active || 0),
     is_archived: Number(row.is_archived || 0),
+    is_pinned: Number(row.is_pinned || 0),
     push_enabled: Number(row.push_enabled || 0) !== 0 ? 1 : 0,
     workspace: row.workspace != null ? String(row.workspace) : null,
     category_id: row.category_id != null ? Number(row.category_id) : null,
@@ -184,6 +192,7 @@ export function createSession(data: {
   source?: string
   agent?: string
   agent_mode?: string
+  agent_preset?: string
   agent_session_id?: string
   agent_native_session_id?: string
   user_id?: string | number | null
@@ -204,6 +213,7 @@ export function createSession(data: {
     return {
       id: data.id, profile: data.profile || 'default', source, agent,
       agent_mode: data.agent_mode || '',
+      agent_preset: data.agent_preset || '',
       agent_session_id: data.agent_session_id || '', agent_native_session_id: data.agent_native_session_id || '',
       user_id: data.user_id == null ? null : String(data.user_id), model: data.model || '', provider: data.provider || '', api_mode: data.api_mode || '', reasoning_effort: data.reasoning_effort || '', title: data.title || null,
       parent_session_id: data.parent_session_id || null,
@@ -212,21 +222,22 @@ export function createSession(data: {
       message_count: 0, tool_call_count: 0,
       input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0, reasoning_tokens: 0,
       billing_provider: null, estimated_cost_usd: 0, actual_cost_usd: null,
-      cost_status: '', preview: '', last_active: now, is_archived: 0, push_enabled: data.push_enabled ? 1 : 0, workspace: data.workspace || null,
+      cost_status: '', preview: '', last_active: now, is_archived: 0, is_pinned: 0, push_enabled: data.push_enabled === false || data.push_enabled === 0 ? 0 : 1, workspace: data.workspace || null,
       category_id: data.category_id ?? null,
       history_revision: 0,
     }
   }
   const db = getDb()!
   db.prepare(
-    `INSERT INTO ${SESSIONS_TABLE} (id, profile, source, agent, agent_mode, agent_session_id, agent_native_session_id, user_id, model, provider, api_mode, reasoning_effort, title, parent_session_id, started_at, last_active, workspace, category_id, push_enabled)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO ${SESSIONS_TABLE} (id, profile, source, agent, agent_mode, agent_preset, agent_session_id, agent_native_session_id, user_id, model, provider, api_mode, reasoning_effort, title, parent_session_id, started_at, last_active, workspace, category_id, push_enabled)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     data.id,
     data.profile || 'default',
     source,
     agent,
     data.agent_mode || '',
+    data.agent_preset || '',
     data.agent_session_id || '',
     data.agent_native_session_id || '',
     data.user_id == null ? null : String(data.user_id),
@@ -240,7 +251,7 @@ export function createSession(data: {
     now,
     data.workspace || null,
     data.category_id ?? null,
-    data.push_enabled ? 1 : 0,
+    data.push_enabled === false || data.push_enabled === 0 ? 0 : 1,
   )
   return getSession(data.id)!
 }
@@ -252,6 +263,7 @@ export function createBranchedSession(data: {
   source?: string
   agent?: string
   agent_mode?: string
+  agent_preset?: string
   agent_session_id?: string
   agent_native_session_id?: string
   user_id?: string | number | null
@@ -297,14 +309,15 @@ export function createBranchedSession(data: {
     ).run(data.ended_at, 'branched', data.parent_session_id)
 
     db.prepare(
-      `INSERT INTO ${SESSIONS_TABLE} (id, profile, source, agent, agent_mode, agent_session_id, agent_native_session_id, user_id, model, provider, api_mode, reasoning_effort, title, parent_session_id, started_at, last_active, workspace, category_id, message_count)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO ${SESSIONS_TABLE} (id, profile, source, agent, agent_mode, agent_preset, agent_session_id, agent_native_session_id, user_id, model, provider, api_mode, reasoning_effort, title, parent_session_id, started_at, last_active, workspace, category_id, message_count)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       data.id,
       data.profile || 'default',
       source,
       agent,
       data.agent_mode || '',
+      data.agent_preset || '',
       data.agent_session_id || '',
       data.agent_native_session_id || '',
       data.user_id == null ? null : String(data.user_id),
@@ -374,6 +387,22 @@ export function getSession(id: string): HermesSessionRow | null {
   return row ? mapSessionRow(row) : null
 }
 
+/** Bounded notification text; never materialize full chat history or tool output. */
+export function getSessionNotificationPreview(id: string): { title: string; preview: string } | null {
+  if (!isSqliteAvailable()) return null
+  const row = getDb()!.prepare(`
+    SELECT SUBSTR(COALESCE(NULLIF(s.title, ''), NULLIF(s.preview, ''),
+      (SELECT SUBSTR(m.content, 1, 63) FROM ${MESSAGES_TABLE} m
+       WHERE m.session_id = s.id AND m.role = 'user' AND m.content != ''
+       ORDER BY m.timestamp, m.id LIMIT 1), ''), 1, 120) AS title,
+      COALESCE((SELECT SUBSTR(COALESCE(NULLIF(m.display_content, ''), m.content), 1, 240)
+       FROM ${MESSAGES_TABLE} m WHERE m.session_id = s.id AND m.role = 'assistant' AND m.content != ''
+       ORDER BY m.timestamp DESC, m.id DESC LIMIT 1), '') AS preview
+    FROM ${SESSIONS_TABLE} s WHERE s.id = ?
+  `).get(id) as { title: string; preview: string } | undefined
+  return row || null
+}
+
 /** Session and branch metadata without loading this session's message bodies. */
 export function getSessionMetadata(id: string): HermesSessionRow | null {
   if (!isSqliteAvailable()) return null
@@ -440,6 +469,7 @@ export function deleteSession(id: string): boolean {
   const db = getDb()!
   db.exec('BEGIN')
   try {
+    db.prepare(`DELETE FROM ${TASK_PLANS_TABLE} WHERE session_id = ?`).run(id)
     db.prepare(`DELETE FROM ${COMPRESSION_SNAPSHOT_TABLE} WHERE session_id = ?`).run(id)
     db.prepare(`DELETE FROM ${MESSAGES_TABLE} WHERE session_id = ?`).run(id)
     const result = db.prepare(`DELETE FROM ${SESSIONS_TABLE} WHERE id = ?`).run(id)
@@ -457,6 +487,7 @@ export function clearSessionMessages(id: string): number {
   db.exec('BEGIN')
   try {
     const result = db.prepare(`DELETE FROM ${MESSAGES_TABLE} WHERE session_id = ?`).run(id)
+    db.prepare(`DELETE FROM ${TASK_PLANS_TABLE} WHERE session_id = ?`).run(id)
     db.prepare(`DELETE FROM ${COMPRESSION_SNAPSHOT_TABLE} WHERE session_id = ?`).run(id)
     db.prepare(
       `UPDATE ${SESSIONS_TABLE}
@@ -484,6 +515,13 @@ export function setSessionArchived(id: string, archived: boolean): boolean {
   if (!isSqliteAvailable()) return false
   const db = getDb()!
   const result = db.prepare(`UPDATE ${SESSIONS_TABLE} SET is_archived = ? WHERE id = ?`).run(archived ? 1 : 0, id)
+  return result.changes > 0
+}
+
+export function setSessionPinned(id: string, pinned: boolean): boolean {
+  if (!isSqliteAvailable()) return false
+  const result = getDb()!.prepare(`UPDATE ${SESSIONS_TABLE} SET is_pinned = ? WHERE id = ?`)
+    .run(pinned ? 1 : 0, id)
   return result.changes > 0
 }
 
@@ -544,12 +582,26 @@ export function listSessions(
     FROM ${SESSIONS_TABLE} s
     LEFT JOIN ${SESSIONS_TABLE} p ON p.id = s.parent_session_id
     WHERE ${filters.sql}
-    ORDER BY s.last_active DESC
-    LIMIT ?
+    ORDER BY s.is_pinned DESC, s.last_active DESC, s.id DESC
+    LIMIT ? OFFSET ?
   `
 
-  const rows = db.prepare(sql).all(...filters.params, limit) as Record<string, unknown>[]
+  const offset = Number.isSafeInteger(options.offset) && options.offset! > 0 ? options.offset! : 0
+  const rows = db.prepare(sql).all(...filters.params, limit, offset) as Record<string, unknown>[]
   return rows.map(mapSessionRow)
+}
+
+export function countSessions(
+  profile?: string,
+  source?: string,
+  options: SessionListOptions = {},
+): number {
+  if (!isSqliteAvailable()) return 0
+  const filters = sessionFilterSql(profile, source ? { ...options, sources: [source] } : options)
+  if (!filters) return 0
+  const row = getDb()!.prepare(`SELECT COUNT(*) AS total FROM ${SESSIONS_TABLE} s WHERE ${filters.sql}`)
+    .get(...filters.params) as { total: number }
+  return Number(row.total)
 }
 
 function escapeSessionSearchLike(value: string): string {
@@ -605,6 +657,19 @@ function sessionFilterSql(
   }
   if (options.includeArchived === false) {
     clauses.push('COALESCE(s.is_archived, 0) = 0')
+  }
+  if (options.pinned !== undefined) clauses.push(options.pinned ? 's.is_pinned = 1' : 's.is_pinned = 0')
+  if (options.categoryId === null) {
+    clauses.push(`(s.category_id IS NULL OR NOT EXISTS (SELECT 1 FROM ${SESSION_CATEGORIES_TABLE} c WHERE c.id = s.category_id))`)
+  } else if (options.categoryId !== undefined) {
+    clauses.push('s.category_id = ?')
+    params.push(String(options.categoryId))
+  }
+  if (options.includeSessionIds !== undefined) {
+    const includedIds = [...new Set(options.includeSessionIds.map(value => value.trim()).filter(Boolean))]
+    if (!includedIds.length) return null
+    clauses.push(`s.id IN (${includedIds.map(() => '?').join(', ')})`)
+    params.push(...includedIds)
   }
 
   const excludedIds = [...new Set((options.excludeSessionIds || []).map(value => value.trim()).filter(Boolean))]

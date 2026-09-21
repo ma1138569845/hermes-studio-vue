@@ -21,6 +21,9 @@ function updateCacheNames(appName: string): string[] {
   }
   names.add('hermes-studio-updater')
   names.add('DechnicAuditor-updater')
+  names.add('Hermes Studio-updater')
+  names.add('ekko-studio-updater')
+  names.add('Ekko Studio-updater')
   return [...names]
 }
 

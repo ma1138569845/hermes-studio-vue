@@ -111,16 +111,53 @@ function anthropicMessagesUrl(target: CodexProxyTarget): string {
   return resolveAnthropicMessagesUrl(target.baseUrl)
 }
 
+export function normalizeGrokResponsesRequest(body: any): any {
+  if (!body || typeof body !== 'object') return body
+  let changed = false
+  const input = Array.isArray(body.input) ? body.input.map((item: any) => {
+    if (!item || typeof item !== 'object' || item.role !== 'system') return item
+    changed = true
+    return { ...item, role: 'developer' }
+  }) : body.input
+  const normalized = changed ? { ...body, input } : body
+  if (!Object.prototype.hasOwnProperty.call(normalized, 'max_output_tokens')) return normalized
+  const { max_output_tokens: _maxOutputTokens, ...withoutMaxOutputTokens } = normalized
+  return withoutMaxOutputTokens
+}
+
+export function normalizeGrokChatCompletionsRequest(body: any): any {
+  if (!body || typeof body !== 'object' || !Array.isArray(body.messages)) return body
+  let changed = false
+  const messages = body.messages.map((message: any) => {
+    if (!message || typeof message !== 'object' || message.role !== 'system') return message
+    changed = true
+    return { ...message, role: 'developer' }
+  })
+  return changed ? { ...body, messages } : body
+}
+
+function nativeResponsesBody(target: CodexProxyTarget, body: any, stream?: boolean): any {
+  const normalized = target.agentId === 'grok' ? normalizeGrokResponsesRequest(body) : body
+  return truncateResponsesToolOutputs({
+    ...normalized,
+    model: target.model,
+    ...(stream === undefined ? {} : { stream }),
+  })
+}
+
 async function callOpenAiChat(target: CodexProxyTarget, body: any): Promise<any> {
   if (target.apiMode !== 'chat_completions') {
     const err = new Error(`Codex proxy only supports chat_completions targets, got ${target.apiMode}`)
     ;(err as any).status = 501
     throw err
   }
-  const chatBody = responsesToOpenAiChat(body, target)
+  const adapted = responsesToOpenAiChat(body, target)
+  const chatBody = target.agentId === 'grok' ? normalizeGrokChatCompletionsRequest(adapted) : adapted
   return agentRunGateway.completeJson({
     url: chatCompletionsUrl(target),
     apiKey: target.apiKey,
+    sessionId: target.chatSessionId || target.agentSessionId || target.routeKey,
+    provider: target.provider,
     body: chatBody,
   })
 }
@@ -135,8 +172,10 @@ async function callAnthropicMessages(target: CodexProxyTarget, body: any): Promi
   return agentRunGateway.completeJson({
     url: anthropicMessagesUrl(target),
     apiKey: target.apiKey,
+    sessionId: target.chatSessionId || target.agentSessionId || target.routeKey,
+    provider: target.provider,
     headers: {
-      'x-api-key': target.apiKey,
+      ...(target.apiKey ? { 'x-api-key': target.apiKey } : {}),
       'anthropic-version': '2023-06-01',
     },
     body: anthropicBody,
@@ -149,10 +188,12 @@ async function callOpenAiResponses(target: CodexProxyTarget, body: any): Promise
     ;(err as any).status = 501
     throw err
   }
-  const responsesBody = truncateResponsesToolOutputs({ ...body, model: target.model })
+  const responsesBody = nativeResponsesBody(target, body)
   return agentRunGateway.completeJson({
     url: resolveResponsesUrl(target.baseUrl),
     apiKey: target.apiKey,
+    sessionId: target.chatSessionId || target.agentSessionId || target.routeKey,
+    provider: target.provider,
     body: responsesBody,
   })
 }
@@ -167,8 +208,30 @@ function responsesEventStream(events: AsyncIterable<CanonicalResponsesEvent>): R
 }
 
 function responseEventForCodexClient(target: CodexProxyTarget, event: CanonicalResponsesEvent): CanonicalResponsesEvent {
-  if (target.apiMode === 'codex_responses' || event.type !== 'response.completed') return event
+  if (event.type !== 'response.completed') return event
   const response = (event.data as any).response
+  if (target.agentId === 'opencode') {
+    // OpenCode's OpenAI Responses provider validates `response.completed`
+    // usage before it accepts the terminal event. Chat-compatible upstreams
+    // are allowed to omit usage, so keep real usage when available and emit
+    // the minimum valid shape otherwise. Without this terminal frame OpenCode
+    // reports an `unknown` finish reason and starts another agent step forever.
+    return {
+      ...event,
+      data: {
+        ...event.data,
+        response: {
+          ...response,
+          usage: response?.usage || {
+            input_tokens: 0,
+            output_tokens: 0,
+            total_tokens: 0,
+          },
+        },
+      },
+    }
+  }
+  if (target.apiMode === 'codex_responses') return event
   if (!response?.usage) return event
   const { usage: _usage, ...responseWithoutUsage } = response
   return {
@@ -181,11 +244,16 @@ function responseEventForCodexClient(target: CodexProxyTarget, event: CanonicalR
 }
 
 function observableResponsesEvents(target: CodexProxyTarget, events: AsyncIterable<CanonicalResponsesEvent>): AsyncIterable<CanonicalResponsesEvent> {
-  async function* observe() {
+async function* observe() {
     for await (const event of normalizeResponsesSseEvents(events)) {
       codingAgentRunManager.handleProxyUsageEvent(target.agentSessionId, event)
       const clientEvent = responseEventForCodexClient(target, event)
-      codingAgentRunManager.handleResponseEvent(target.agentSessionId, clientEvent)
+      // Grok, OpenCode and DSH report the same model activity through their native
+      // stdout streams. The proxy remains responsible for transport and usage
+      // accounting, but must not become a second chat lifecycle source.
+      if (target.agentId !== 'grok' && target.agentId !== 'opencode' && target.agentId !== 'dsh') {
+        codingAgentRunManager.handleResponseEvent(target.agentSessionId, clientEvent)
+      }
       yield clientEvent
     }
   }
@@ -199,10 +267,13 @@ async function openAiChatToResponsesSseStream(target: CodexProxyTarget, body: an
     throw err
   }
 
-  const chatBody = responsesToOpenAiChat(body, target, true)
+  const adapted = responsesToOpenAiChat(body, target, true)
+  const chatBody = target.agentId === 'grok' ? normalizeGrokChatCompletionsRequest(adapted) : adapted
   const stream = await agentRunGateway.streamBytes({
     url: chatCompletionsUrl(target),
     apiKey: target.apiKey,
+    sessionId: target.chatSessionId || target.agentSessionId || target.routeKey,
+    provider: target.provider,
     body: chatBody,
   })
   return responsesEventStream(observableResponsesEvents(target, openAiChatSseToResponsesEvents(stream, {
@@ -222,8 +293,10 @@ async function anthropicMessagesToResponsesSseStream(target: CodexProxyTarget, b
   const stream = await agentRunGateway.streamBytes({
     url: anthropicMessagesUrl(target),
     apiKey: target.apiKey,
+    sessionId: target.chatSessionId || target.agentSessionId || target.routeKey,
+    provider: target.provider,
     headers: {
-      'x-api-key': target.apiKey,
+      ...(target.apiKey ? { 'x-api-key': target.apiKey } : {}),
       'anthropic-version': '2023-06-01',
     },
     body: anthropicBody,
@@ -241,10 +314,12 @@ async function openAiResponsesSseStream(target: CodexProxyTarget, body: any): Pr
     throw err
   }
 
-  const responsesBody = truncateResponsesToolOutputs({ ...body, model: target.model, stream: true })
+  const responsesBody = nativeResponsesBody(target, body, true)
   const stream = await agentRunGateway.streamBytes({
     url: resolveResponsesUrl(target.baseUrl),
     apiKey: target.apiKey,
+    sessionId: target.chatSessionId || target.agentSessionId || target.routeKey,
+    provider: target.provider,
     body: responsesBody,
   })
   return responsesEventStream(observableResponsesEvents(target, openAiResponsesSseToResponsesEvents(stream)))
@@ -256,7 +331,10 @@ export async function codexProxyResponses(ctx: Context) {
   try {
     // Sanitize once before API-mode dispatch so native Responses, Chat
     // Completions, and Anthropic adapters all receive the same bounded history.
-    const requestBody = stripHistoricalResponsesInlineImages(ctx.request.body || {})
+    const sanitizedBody = stripHistoricalResponsesInlineImages(ctx.request.body || {})
+    const requestBody = target.agentId === 'grok'
+      ? normalizeGrokResponsesRequest(sanitizedBody)
+      : sanitizedBody
     if ((requestBody as any).stream === true) {
       const stream = target.apiMode === 'anthropic_messages'
         ? await anthropicMessagesToResponsesSseStream(target, requestBody)

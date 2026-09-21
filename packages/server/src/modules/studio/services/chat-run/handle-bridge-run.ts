@@ -1,3 +1,5 @@
+import { hermesStudioMcpCapabilities } from './studio-mcp'
+import { withTaskPlanTurnContext } from '../task-plan-runs'
 /**
  * CLI Bridge run handler — handles runs that use the agent bridge
  * to communicate with Hermes CLI agent.
@@ -50,6 +52,8 @@ import type { AuthenticatedUser } from '../../public/auth'
 import { ensureHermesRunWorkspace } from './workspace'
 import { observeRunChatPetEvent } from '../../public/pet-events'
 import { completeWorkspaceRunCheckpoint, startWorkspaceRunCheckpoint } from './workspace-diff-tracker'
+import { resolveAuthorizedProviderRuntimeCredentials } from '../../public/authorized-provider-runtime'
+import { saveEnvValueForProfile } from '../../public/profile-config'
 
 const BRIDGE_USAGE_FLUSH_DELAY_MS = 200
 const BRIDGE_TITLE_EVENT_POLL_INTERVAL_MS = 500
@@ -429,7 +433,7 @@ async function ensureBridgeFixedContext(args: {
 export async function handleBridgeRun(
   nsp: ReturnType<Server['of']>,
   socket: Socket,
-  data: { input: string | ContentBlock[]; display_input?: string | ContentBlock[] | null; display_role?: 'user' | 'command'; storage_message?: string; session_id?: string; model?: string; provider?: string; model_groups?: RunModelGroup[]; instructions?: string; workspace?: string | null; category_id?: number | null; source?: string; session_source?: 'global_agent' | 'workflow' | 'group_chat'; queue_id?: string; peerExcludeSocketId?: string; reasoning_effort?: string; push_enabled?: boolean; background_delegation_enabled?: boolean; one_shot_model?: boolean; background_delegation_id?: string; background_claim_id?: string; autonomous?: boolean; onEvent?: (event: string, payload: any) => void },
+  data: { task_plan_context_id?: string; input: string | ContentBlock[]; display_input?: string | ContentBlock[] | null; display_role?: 'user' | 'command'; storage_message?: string; session_id?: string; model?: string; provider?: string; model_groups?: RunModelGroup[]; instructions?: string; workspace?: string | null; category_id?: number | null; source?: string; session_source?: 'global_agent' | 'workflow' | 'group_chat'; queue_id?: string; peerExcludeSocketId?: string; reasoning_effort?: string; push_enabled?: boolean; background_delegation_enabled?: boolean; one_shot_model?: boolean; background_delegation_id?: string; background_claim_id?: string; autonomous?: boolean; onEvent?: (event: string, payload: any) => void },
   profile: string,
   sessionMap: Map<string, SessionState>,
   bridge: AgentBridgeClient,
@@ -462,7 +466,7 @@ export async function handleBridgeRun(
   // message of every request. Compose only when a caller hands us nothing.
   let fullInstructions = callbackContext?.instructions
     || instructions
-    || getSystemPrompt(undefined, { source: data.session_source || data.source })
+    || getSystemPrompt(undefined, { source: data.session_source || data.source, mcpCapabilities: await hermesStudioMcpCapabilities(profile) })
   const sessionRow = getSession(session_id)
   if (sessionRow && !sessionRow.user_id && socketUser?.id != null) {
     updateSession(session_id, { user_id: String(socketUser.id) })
@@ -476,7 +480,7 @@ export async function handleBridgeRun(
   if (sessionRow && !sessionRow.workspace) updateSession(session_id, { workspace })
   const sessionModel = callbackContext?.model || sessionRow?.model || ''
   const sessionProvider = callbackContext?.provider || sessionRow?.provider || ''
-  const { model: resolvedModel, provider: resolvedProvider } = await resolveBridgeRunModelConfig({
+  const selectedModelConfig = await resolveBridgeRunModelConfig({
     profile,
     sessionModel,
     sessionProvider,
@@ -484,11 +488,29 @@ export async function handleBridgeRun(
     requestedProvider: callbackContext?.provider || data.provider,
     modelGroups: data.model_groups,
     preferRequested: Boolean(callbackContext) || data.one_shot_model === true,
+    preserveAuthorizedProvider: true,
   })
+  const resolvedModel = selectedModelConfig.model
+  const selectedProvider = selectedModelConfig.provider
+  if (selectedProvider === 'claude-oauth') {
+    // Studio owns OAuth refresh. Resolving here happens before context
+    // estimation can create a cached Python Agent and synchronizes Claude's
+    // fresh access token into the profile ANTHROPIC_TOKEN environment.
+    const credentials = await resolveAuthorizedProviderRuntimeCredentials({
+      profile,
+      provider: selectedProvider,
+      model: resolvedModel,
+    })
+    // Hermes Agent's native Anthropic bridge reads Claude OAuth only from
+    // ANTHROPIC_TOKEN. This is intentionally Claude-specific: no other
+    // authorized provider or provider environment is touched here.
+    await saveEnvValueForProfile(profile, 'ANTHROPIC_TOKEN', credentials.apiKey)
+  }
+  const resolvedProvider = selectedProvider === 'claude-oauth' ? 'anthropic' : selectedProvider
   if (sessionRow && !callbackContext && data.one_shot_model !== true) {
     const updates: { model?: string; provider?: string } = {}
     if (resolvedModel && sessionRow.model !== resolvedModel) updates.model = resolvedModel
-    if (resolvedProvider && sessionRow.provider !== resolvedProvider) updates.provider = resolvedProvider
+    if (selectedProvider && sessionRow.provider !== selectedProvider) updates.provider = selectedProvider
     if (Object.keys(updates).length > 0) updateSession(session_id, updates)
   }
   await writeModelRunProfileToken(socketUser, profile)
@@ -563,7 +585,7 @@ export async function handleBridgeRun(
     if (!getSession(session_id)) {
       const previewText = extractTextForPreview(displayInput || input)
       const preview = previewText.replace(/[\r\n]/g, ' ').substring(0, 100)
-      createSession({ id: session_id, profile, source: runSource, user_id: socketUser?.id, model: resolvedModel, provider: resolvedProvider, reasoning_effort: reasoningEffort || '', title: preview, workspace, category_id: data.category_id, push_enabled: data.push_enabled })
+      createSession({ id: session_id, profile, source: runSource, user_id: socketUser?.id, model: resolvedModel, provider: selectedProvider, reasoning_effort: reasoningEffort || '', title: preview, workspace, category_id: data.category_id, push_enabled: data.push_enabled })
     }
     messageId = addMessage({
       session_id,
@@ -585,7 +607,7 @@ export async function handleBridgeRun(
   } else if (!getSession(session_id)) {
     const previewText = displayInput === null ? extractTextForPreview(input) : extractTextForPreview(displayInput || input)
     const preview = previewText.replace(/[\r\n]/g, ' ').substring(0, 100)
-    createSession({ id: session_id, profile, source: runSource, user_id: socketUser?.id, model: resolvedModel, provider: resolvedProvider, reasoning_effort: reasoningEffort || '', title: preview, workspace, category_id: data.category_id, push_enabled: data.push_enabled })
+    createSession({ id: session_id, profile, source: runSource, user_id: socketUser?.id, model: resolvedModel, provider: selectedProvider, reasoning_effort: reasoningEffort || '', title: preview, workspace, category_id: data.category_id, push_enabled: data.push_enabled })
   }
 
   socket.join(`session:${session_id}`)
@@ -703,9 +725,10 @@ export async function handleBridgeRun(
   let backgroundNotificationAccepted = false
 
   try {
-    const bridgeInput = isContentBlockArray(input)
+    const originalBridgeInput = isContentBlockArray(input)
       ? await convertContentBlocksForAgent(input)
       : input
+    const bridgeInput = withTaskPlanTurnContext(originalBridgeInput, data.task_plan_context_id)
     const runMetadata: BridgeRunMetadata = {
       autonomous: data.autonomous === true,
       delegationId: data.background_delegation_id,
@@ -720,7 +743,7 @@ export async function handleBridgeRun(
           { role: 'user', content: structuredClone(bridgeInput) } as ChatMessage,
         ],
         model: resolvedModel,
-        provider: resolvedProvider,
+        provider: selectedProvider,
         profile,
         instructions: fullInstructions,
         workspace,
@@ -729,7 +752,7 @@ export async function handleBridgeRun(
     }
     const bridgeStorageInput = data.storage_message !== undefined
       ? data.storage_message
-      : isContentBlockArray(input)
+      : data.task_plan_context_id || isContentBlockArray(input)
         ? inputStr
         : undefined
     logger.info('[chat-run-socket] starting CLI bridge run for session %s', session_id)

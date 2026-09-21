@@ -9,10 +9,11 @@ import { listProfileNamesFromDisk } from '../profiles/profile'
 
 const LEGACY_SERVER_NAME = 'hermes-studio'
 const MANAGED_SERVERS: ReadonlyArray<{ name: string; toolset: string }> = [
-  { name: 'hermes-studio-api', toolset: 'api' },
-  { name: 'hermes-studio-browser', toolset: 'browser' },
-  { name: 'hermes-studio-devices', toolset: 'devices' },
-  { name: 'hermes-studio-use', toolset: 'use' },
+  { name: 'ekko-studio-api', toolset: 'api' },
+  { name: 'ekko-studio-browser', toolset: 'browser' },
+  { name: 'ekko-studio-devices', toolset: 'devices' },
+  { name: 'ekko-studio-use', toolset: 'use' },
+  { name: 'ekko-studio-interaction', toolset: 'plan' },
 ]
 const MANAGED_SERVER_NAMES: Set<string> = new Set(MANAGED_SERVERS.map(server => server.name))
 // Hermes Agent applies this per managed MCP server. Keep the long-running
@@ -20,15 +21,22 @@ const MANAGED_SERVER_NAMES: Set<string> = new Set(MANAGED_SERVERS.map(server => 
 // headroom; unrelated API/browser/device calls retain the client default.
 const MANAGED_USE_MCP_TIMEOUT_SECONDS = 30 * 60 + 60
 const LEGACY_SERVER_NAMES = new Set([
+  'ekko-studio-plan',
+  'hermes-studio-api',
+  'hermes-studio-browser',
+  'hermes-studio-devices',
+  'hermes-studio-use',
+  'hermes-studio-mcp',
   LEGACY_SERVER_NAME,
   'hermes-web-ui-mcp',
-  'hermes-studio-mcp',
+  'ekko-studio-mcp',
 ])
 const MANAGED_ENV_KEY = 'HERMES_WEB_UI_MANAGED_MCP'
 const LEGACY_COMMANDS = new Set([
   'hermes-lan-peer-mcp',
   'hermes-devices-mcp',
   'hermes-web-ui-mcp',
+  'ekko-studio-mcp',
   'hermes-studio-mcp',
 ])
 
@@ -124,9 +132,9 @@ function isDesktopRuntime(): boolean {
 function candidateBundledMcpScripts(): string[] {
   return [
     process.env.HERMES_WEB_UI_MCP_BIN,
-    join(process.cwd(), 'bin/hermes-studio-mcp.mjs'),
-    join(__dirname, '../../bin/hermes-studio-mcp.mjs'),
-    join(__dirname, '../../../../../../bin/hermes-studio-mcp.mjs'),
+    join(process.cwd(), 'bin/ekko-studio-mcp.mjs'),
+    join(__dirname, '../../bin/ekko-studio-mcp.mjs'),
+    join(__dirname, '../../../../../../bin/ekko-studio-mcp.mjs'),
     join(process.cwd(), 'bin/hermes-web-ui-mcp.mjs'),
     join(__dirname, '../../bin/hermes-web-ui-mcp.mjs'),
     join(__dirname, '../../../../../../bin/hermes-web-ui-mcp.mjs'),
@@ -147,7 +155,7 @@ function managedCommandConfig(
   bundledScript: string | null,
 ): Record<string, unknown> {
   // Prefer the bundled script with an absolute path over a bare command name.
-  // On Windows (especially desktop builds), `hermes-studio-mcp` may not be in
+  // On Windows (especially desktop builds), `ekko-studio-mcp` may not be in
   // PATH even though the bundled .mjs script exists on disk.  Desktop provides
   // HERMES_AGENT_NODE for the packaged runtime node; fall back to process.execPath.
   if (bundledScript) {
@@ -155,11 +163,11 @@ function managedCommandConfig(
   }
 
   if (isDesktopRuntime()) {
-    return { command: 'hermes-studio-mcp', args: [toolset] }
+    return { command: 'ekko-studio-mcp', args: [toolset] }
   }
 
   logger.warn({ candidates: candidateBundledMcpScripts() }, '[mcp-autoinject] bundled MCP script not found; falling back to PATH command')
-  return { command: 'hermes-studio-mcp', args: [toolset] }
+  return { command: 'ekko-studio-mcp', args: [toolset] }
 }
 
 function managedConfig(
@@ -169,12 +177,16 @@ function managedConfig(
   bundledScript: string | null,
 ): Record<string, unknown> {
   const env: Record<string, string> = {
+    // process.execPath can be Electron. Persist Node mode for external MCP
+    // clients (such as Gateway) that do not inherit the desktop server's env.
+    ELECTRON_RUN_AS_NODE: '1',
     HERMES_WEB_UI_URL: `http://127.0.0.1:${config.port}`,
     HERMES_WEB_UI_HOME: config.appHome,
     HERMES_WEBUI_STATE_DIR: config.appHome,
     HERMES_WEB_UI_PROFILE: profile,
     HERMES_MCP_SERVER_NAME: serverName,
     HERMES_MCP_TOOLSET: toolset,
+    HERMES_MCP_USER_CLARIFICATION: '0',
     [MANAGED_ENV_KEY]: '1',
   }
 
@@ -211,12 +223,14 @@ function sameConfig(existing: Record<string, any>, desired: Record<string, unkno
     (desired.timeout === undefined || existing.timeout === desired.timeout) &&
     existing.enabled !== false &&
     isRecord(existing.env) &&
+    existing.env.ELECTRON_RUN_AS_NODE === desiredEnv.ELECTRON_RUN_AS_NODE &&
     existing.env.HERMES_WEB_UI_URL === desiredEnv.HERMES_WEB_UI_URL &&
     existing.env.HERMES_WEB_UI_HOME === desiredEnv.HERMES_WEB_UI_HOME &&
     existing.env.HERMES_WEBUI_STATE_DIR === desiredEnv.HERMES_WEBUI_STATE_DIR &&
     existing.env.HERMES_WEB_UI_PROFILE === desiredEnv.HERMES_WEB_UI_PROFILE &&
     existing.env.HERMES_MCP_SERVER_NAME === desiredEnv.HERMES_MCP_SERVER_NAME &&
     existing.env.HERMES_MCP_TOOLSET === desiredEnv.HERMES_MCP_TOOLSET &&
+    existing.env.HERMES_MCP_USER_CLARIFICATION === desiredEnv.HERMES_MCP_USER_CLARIFICATION &&
     existing.env.HERMES_WEB_UI_TOKEN === undefined &&
     existing.env[MANAGED_ENV_KEY] === desiredEnv[MANAGED_ENV_KEY]
 }
@@ -232,6 +246,16 @@ async function injectIntoProfile(
     let changed = false
     let injected = false
     let hadManagedExisting = false
+
+    for (const { name } of MANAGED_SERVERS) {
+      const legacyName = name === 'ekko-studio-interaction' ? 'ekko-studio-plan' : name.replace(/^ekko-/, 'hermes-')
+      const legacy = cfg.mcp_servers[legacyName]
+      if (!cfg.mcp_servers[name] && isManagedServer(legacy)) {
+        cfg.mcp_servers[name] = legacy
+        delete cfg.mcp_servers[legacyName]
+        changed = true
+      }
+    }
 
     for (const [name, server] of Object.entries(cfg.mcp_servers)) {
       if (MANAGED_SERVER_NAMES.has(name)) continue
@@ -279,7 +303,7 @@ async function injectIntoProfile(
       if (isRecord(existing) && existing.enabled === false) {
         return {
           data: cfg,
-          write: false,
+          write: changed,
           result: {
             profile,
             status: 'skipped',

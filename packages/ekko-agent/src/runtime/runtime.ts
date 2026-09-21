@@ -15,6 +15,7 @@ import { countTextTokens } from '../model/tokens'
 import type { AgentMessageInput, AgentOutputMessage } from '../model/messages'
 import type { AgentMessage, AgentToolCall, AgentToolDefinition, ModelRequest, ModelResponse } from '../model/types'
 import type { AgentSkill } from '../skills/types'
+import { RunTaskPlan } from '../tools/plan'
 import { AgentToolRegistry, createDefaultToolRegistry } from '../tools/registry'
 import { sanitizeAgentToolResult } from '../tools/tool-result-sanitizer'
 import type { AgentTaskRequest, AgentToolContext, AgentToolResult } from '../tools/types'
@@ -53,10 +54,10 @@ import { SkillReviewService } from '../skills/review'
 import type { EkkoExternalSkillDirectory } from '../skills/external-directories'
 import { EkkoRuntimeLogger } from '../logging/runtime-logger'
 import {
-  DEFAULT_AGENT_MAX_CONSECUTIVE_TOOL_FAILURES,
   DEFAULT_AGENT_MAX_STEPS,
   DEFAULT_AGENT_MODEL_MAX_RETRIES,
   DEFAULT_AGENT_SUBTASK_MAX_STEPS,
+  DEFAULT_AGENT_TOOL_FAILURE_RECOVERY_THRESHOLD,
   DEFAULT_SKILL_REVIEW_TOOL_CALL_INTERVAL,
 } from '../config'
 
@@ -64,6 +65,7 @@ const MAX_TRACKED_SKILL_REVIEW_CONTEXTS = 1_024
 const MAX_CONCURRENT_TOOL_CALLS = 8
 const SUBTASK_OUTPUT_TAIL_CHARS = 4_000
 const SUBTASK_SUMMARY_CHARS = 500
+const TOOL_FAILURE_RECOVERY_DETAIL_CHARS = 2_000
 interface ModelResponseResult {
   response: ModelResponse
   emittedReasoning: boolean
@@ -103,6 +105,23 @@ interface ToolCallSegment {
 interface ExecutedToolCall {
   toolCall: AgentToolCall
   result: AgentToolResult
+}
+
+interface ToolFailureStreak {
+  toolName: string
+  failures: number
+}
+
+function toolFailureRecoveryPrompt(streak: ToolFailureStreak, result: AgentToolResult): string {
+  const detail = String(result.error || result.content || 'Unknown tool failure.')
+    .slice(0, TOOL_FAILURE_RECOVERY_DETAIL_CHARS)
+  return [
+    `Tool recovery required: "${streak.toolName}" failed ${streak.failures} consecutive times.`,
+    'Do not repeat the same call unchanged and do not stop the run because of these tool failures.',
+    'Diagnose the latest error, correct the arguments or prerequisites, or switch to a different tool or approach.',
+    'Continue working toward the user\'s goal.',
+    `Latest failure: ${detail}`,
+  ].join('\n')
 }
 
 function foregroundOnlyDelegateTaskDefinition(definition: AgentToolDefinition): AgentToolDefinition {
@@ -158,7 +177,7 @@ export class AgentRuntime {
   private readonly toolContext?: AgentToolContext
   private readonly modelDefaults?: AgentRuntimeOptions['modelDefaults']
   private readonly maxModelRetries: number
-  private readonly maxConsecutiveToolFailures: number
+  private readonly toolFailureRecoveryThreshold: number
   private readonly backgroundDelegationEnabled: boolean
   private readonly subtaskMaxSteps: number
   private readonly defaultContextKey?: string
@@ -201,7 +220,11 @@ export class AgentRuntime {
     this.toolContext = options.toolContext
     this.modelDefaults = options.modelDefaults
     this.maxModelRetries = options.maxModelRetries ?? DEFAULT_AGENT_MODEL_MAX_RETRIES
-    this.maxConsecutiveToolFailures = options.maxConsecutiveToolFailures ?? DEFAULT_AGENT_MAX_CONSECUTIVE_TOOL_FAILURES
+    this.toolFailureRecoveryThreshold = Math.max(1, Math.floor(
+      options.toolFailureRecoveryThreshold
+      ?? options.maxConsecutiveToolFailures
+      ?? DEFAULT_AGENT_TOOL_FAILURE_RECOVERY_THRESHOLD,
+    ))
     this.backgroundDelegationEnabled = options.backgroundDelegationEnabled !== false
     this.subtaskMaxSteps = Math.max(
       1,
@@ -337,25 +360,36 @@ export class AgentRuntime {
     const steps: AgentRuntimeStep[] = []
     const maxSteps = input.maxSteps ?? this.maxSteps
     const maxModelRetries = input.maxModelRetries ?? this.maxModelRetries
-    const maxConsecutiveToolFailures = input.maxConsecutiveToolFailures ?? this.maxConsecutiveToolFailures
+    const toolFailureRecoveryThreshold = Math.max(1, Math.floor(
+      input.toolFailureRecoveryThreshold
+      ?? input.maxConsecutiveToolFailures
+      ?? this.toolFailureRecoveryThreshold,
+    ))
     const pendingBackgroundSubagentIds = new Set<string>()
+    const taskPlan = new RunTaskPlan(runId, plan => {
+      input.onPlanUpdate?.(plan)
+      emit({ type: 'plan.updated', runId, plan })
+    })
     const emit = (event: AgentRuntimeEvent) => {
+      if (event.type === 'run.completed') {
+        taskPlan.finish(event.output.finishReason === 'boundary_interrupt' ? 'interrupted' : 'ended')
+      } else if (event.type === 'run.failed') {
+        taskPlan.finish(input.signal?.aborted ? 'interrupted' : 'failed')
+      }
       events.push(event)
       input.onEvent?.(event)
     }
 
+    // Publish interruption before the host closes its stream, even if an active tool
+    // takes time to acknowledge cancellation. The run error path retries failed commits.
+    const interruptPlan = () => {
+      try { taskPlan.finish('interrupted') } catch { /* Retried by run.failed. */ }
+    }
     const inputSkills = this.areSkillsAvailable() ? input.skills ?? [] : []
     this.registerSkillTools(inputSkills)
     const memoryIdentity = this.memoryIdentityFor(input)
     const memoryPreparation = await this.prepareMemory(input, memoryIdentity, runId)
     const memoryContext = memoryPreparation?.context
-    const captureMessages = this.memoryCaptureMessages(input)
-    const forceInitialMemoryForget = Boolean(
-      memoryIdentity && hasExplicitMemoryForgetIntent(captureMessages),
-    )
-    const forceInitialMemoryWrite = Boolean(
-      memoryIdentity && !forceInitialMemoryForget && hasExplicitMemoryIntent(captureMessages),
-    )
     const sessionId = this.contextKeyFor(input)?.trim()
     const activeBoundaryRun = sessionId
       ? this.registerBoundaryRun(sessionId, runId)
@@ -365,6 +399,10 @@ export class AgentRuntime {
 
     const executionToolContext: AgentToolContext = {
       ...(this.runToolContext(input, memoryPreparation?.sourceMessageIds) || {}),
+      updatePlan: update => {
+        throwIfAborted(input.signal)
+        return taskPlan.update(update)
+      },
       runId,
       modelCapabilities: this.modelClientFor(input).capabilities,
       modelProvider: this.modelClientFor(input).provider,
@@ -408,7 +446,7 @@ export class AgentRuntime {
     }
     const contextKey = this.contextKeyFor(input)
     let contextEstimate: AgentRuntimeContextEstimate | undefined
-    let consecutiveToolFailures = 0
+    let toolFailureStreak: ToolFailureStreak | undefined
     const completeBoundaryInterrupt = (completedSteps: number): AgentRuntimeRunResult => {
       if (activeBoundaryRun) activeBoundaryRun.terminal = true
       output = {
@@ -421,6 +459,7 @@ export class AgentRuntime {
       return { runId, messages, output, steps, events, context, contextEstimate, memoryContext }
     }
 
+    input.signal?.addEventListener('abort', interruptPlan, { once: true })
     try {
       const automaticRecoveryCalls = this.currentRecoveryDirective()?.automaticToolCalls ?? []
       if (automaticRecoveryCalls.length) {
@@ -489,23 +528,7 @@ export class AgentRuntime {
         const modelClient = this.modelClientFor(input)
         emit({ type: 'model.started', runId, step })
         const request = this.modelRequest(input, messages, modelClient, contextKey, modelSignal)
-        if (forceInitialMemoryForget && request.tools) {
-          const forgetTools = request.tools.filter(tool => (
-            tool.name === 'memory_search' || tool.name === 'memory_get' || tool.name === 'memory_forget'
-          ))
-          if (forgetTools.length) {
-            request.tools = forgetTools
-            request.toolChoice = 'required'
-          }
-        } else if (step === 1 && forceInitialMemoryWrite) {
-          const writeTools = request.tools?.filter(tool => (
-            tool.name === 'memory_search' || tool.name === 'memory_get' || tool.name === 'memory_write'
-          ))
-          if (writeTools?.length) {
-            request.tools = writeTools
-            request.toolChoice = 'required'
-          }
-        }
+        request.metadata = { ...request.metadata, session_id: contextKey || runId }
         const recoveryDirective = this.currentRecoveryDirective()
         if (recoveryDirective?.active && request.tools?.length) {
           const allowed = new Set(recoveryDirective.allowedToolNames)
@@ -528,7 +551,7 @@ export class AgentRuntime {
         )
         if (activeBoundaryRun?.pending) return completeBoundaryInterrupt(step - 1)
         const response = modelResult.response
-        const assistantMessage = modelResponseToAgentMessage(response)
+        const assistantMessage = normalizeToolCallPreamble(modelResponseToAgentMessage(response))
         const toolCalls = assistantMessage.toolCalls ?? []
         const blockedByRecovery = toolCalls.length === 0 && this.currentRecoveryDirective()?.active === true
         if (activeBoundaryRun && toolCalls.length > 0) {
@@ -567,6 +590,7 @@ export class AgentRuntime {
           return { runId, messages, output, steps, events, context, contextEstimate, memoryContext }
         }
 
+        const toolRecoveryPrompts: string[] = []
         for (const segment of this.planToolCallSegments(toolCalls)) {
           const executedCalls = await this.executeToolCallSegment(
             runId,
@@ -579,40 +603,27 @@ export class AgentRuntime {
           for (const { toolCall, result } of executedCalls) {
             messages.push(createToolResultMessage(toolCall.id, result.content, toolCall.name, result.contentParts))
             steps.push({ type: 'tool', step, toolCallId: toolCall.id, toolName: toolCall.name, result })
-            consecutiveToolFailures = result.ok ? 0 : consecutiveToolFailures + 1
             if (input.skillReviewEnabled !== false) this.recordSkillToolCall(contextKey, toolCall.name)
-            if (!result.ok && (toolCall.name === 'memory_write' || toolCall.name === 'memory_forget')) {
-              if (activeBoundaryRun) activeBoundaryRun.terminal = true
-              output = {
-                role: 'assistant',
-                content: `记忆操作未完成：${result.error || result.content || '未知错误'}`,
-                finishReason: 'memory_tool_failed',
-              }
-              messages.push(output)
-              steps.push({ type: 'model', step, message: output })
-              emit({ type: 'model.message', runId, step, message: output })
-              const context = contextKey ? this.modelContexts.get(contextKey) : undefined
-              emit({ type: 'run.completed', runId, output, steps: step, context, contextEstimate })
-              this.completeMemory(memoryIdentity, messages, input)
-              this.completeSkillReview(runId, contextKey, messages, input, input.onEvent)
-              return { runId, messages, output, steps, events, context, contextEstimate, memoryContext }
+            if (result.ok) {
+              toolFailureStreak = undefined
+              continue
             }
-            if (maxConsecutiveToolFailures > 0 && consecutiveToolFailures >= maxConsecutiveToolFailures) {
-              if (activeBoundaryRun) activeBoundaryRun.terminal = true
-              emit({ type: 'run.tool_failure_limit', runId, failures: consecutiveToolFailures })
-              output = {
-                role: 'assistant',
-                content: `Stopped after ${consecutiveToolFailures} consecutive tool failures.`,
-                finishReason: 'tool_failure_limit',
-              }
-              const context = contextKey ? this.modelContexts.get(contextKey) : undefined
-              emit({ type: 'run.completed', runId, output, steps: step, context, contextEstimate })
-              this.completeMemory(memoryIdentity, messages, input)
-              this.completeSkillReview(runId, contextKey, messages, input, input.onEvent)
-              return { runId, messages, output, steps, events, context, contextEstimate, memoryContext }
+            toolFailureStreak = toolFailureStreak?.toolName === toolCall.name
+              ? { toolName: toolCall.name, failures: toolFailureStreak.failures + 1 }
+              : { toolName: toolCall.name, failures: 1 }
+            if (toolFailureStreak.failures >= toolFailureRecoveryThreshold) {
+              emit({
+                type: 'run.tool_recovery_required',
+                runId,
+                toolName: toolCall.name,
+                failures: toolFailureStreak.failures,
+              })
+              toolRecoveryPrompts.push(toolFailureRecoveryPrompt(toolFailureStreak, result))
+              toolFailureStreak = undefined
             }
           }
         }
+        messages.push(...toolRecoveryPrompts.map(createSystemMessage))
         if (pendingBackgroundSubagentIds.size > 0) {
           const continuationMessages = cloneAgentMessages(messages.slice(1))
           for (const subagentId of pendingBackgroundSubagentIds) {
@@ -656,6 +667,7 @@ export class AgentRuntime {
       emit({ type: 'run.failed', runId, error: message, steps: steps.length })
       throw error
     } finally {
+      input.signal?.removeEventListener('abort', interruptPlan)
       for (const subagentId of pendingBackgroundSubagentIds) {
         const task = this.backgroundTasks.get(subagentId)
         task?.controller.abort()
@@ -825,6 +837,7 @@ export class AgentRuntime {
       runtimeInstructions: this.currentRuntimeInstructions(),
       userSystemMessages,
       memoryContext,
+      planningEnabled: this.toolsEnabled && !!this.tools.get('update_plan'),
       clarificationEnabled: this.toolsEnabled && !!this.tools.get('clarify'),
       skillDiscoveryEnabled: this.toolsEnabled && this.areSkillsAvailable() &&
         !!this.tools.get('skill_list') &&
@@ -1028,6 +1041,7 @@ export class AgentRuntime {
       requestLogger: this.runtimeLogger,
       requestLogContext: input.logContext,
       requestRunId: runId,
+      sessionId: contextKey || runId,
       onUsage: input.onSkillReviewUsage,
       onStarted: reviewId => emit?.({ type: 'skill.review.started', runId, reviewId }),
       onCompleted: (reviewId, mutations) => emit?.({
@@ -1371,7 +1385,8 @@ export class AgentRuntime {
             this.subtaskMaxSteps,
           ),
           maxModelRetries: parentInput.maxModelRetries,
-          maxConsecutiveToolFailures: parentInput.maxConsecutiveToolFailures,
+          toolFailureRecoveryThreshold: parentInput.toolFailureRecoveryThreshold
+            ?? parentInput.maxConsecutiveToolFailures,
           toolContext: {
             ...(parentInput.toolContext ?? this.toolContext),
             signal: controller.signal,
@@ -1457,7 +1472,7 @@ export class AgentRuntime {
           },
         })
         output = child.output.content || ''
-        if (child.output.finishReason === 'tool_failure_limit' || child.output.finishReason === 'max_steps') {
+        if (child.output.finishReason === 'max_steps') {
           status = 'failed'
           error = output || `Subtask stopped with ${child.output.finishReason}.`
         }
@@ -1689,6 +1704,17 @@ function removeHistoricalSkillViews(
 
 function throwIfAborted(signal?: AbortSignal): void {
   if (signal?.aborted) throw abortError()
+}
+
+function normalizeToolCallPreamble(message: AgentOutputMessage): AgentOutputMessage {
+  if (!message.toolCalls?.length || !/[:：]\s*$/.test(message.content)) return message
+  const trailingWhitespace = message.content.match(/\s*$/)?.[0] || ''
+  const body = message.content.slice(0, message.content.length - trailingWhitespace.length)
+  const punctuation = /[\u3400-\u9fff\u3040-\u30ff\uac00-\ud7af]/u.test(body) ? '。' : '.'
+  return {
+    ...message,
+    content: `${body.slice(0, -1)}${punctuation}${trailingWhitespace}`,
+  }
 }
 
 function enterBoundaryModelPhase(

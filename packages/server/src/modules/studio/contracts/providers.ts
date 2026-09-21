@@ -3,6 +3,8 @@
  * Synced from hermes-agent hermes_cli/models.py _PROVIDER_MODELS.
  */
 
+import { OPENCODE_FREE_PROVIDER, OPENCODE_FREE_BASE_URL } from './opencode-free'
+
 export interface ProviderPreset {
   label: string
   value: string
@@ -14,10 +16,10 @@ export interface ProviderPreset {
 
 export const PROVIDER_PRESETS: ProviderPreset[] = [
   {
-    label: 'Codex-apikey.fun',
+    label: 'Codex-apikey.fan',
     value: 'fun-codex',
     builtin: true,
-    base_url: 'https://api.apikey.fun/v1',
+    base_url: 'https://api.apikey.fan/v1',
     api_mode: 'codex_responses',
     models: [
       'gpt-5.5',
@@ -28,10 +30,10 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     ],
   },
   {
-    label: 'Claude-apikey.fun',
+    label: 'Claude-apikey.fan',
     value: 'fun-claude',
     builtin: true,
-    base_url: 'https://api.apikey.fun',
+    base_url: 'https://api.apikey.fan',
     api_mode: "anthropic_messages",
     models: [
       'claude-opus-4-8',
@@ -409,6 +411,13 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
       'gemini-3.1-pro-preview',
       'gemini-2.5-pro',
     ],
+  },
+  {
+    label: 'OpenCode Free',
+    value: OPENCODE_FREE_PROVIDER,
+    builtin: true,
+    base_url: OPENCODE_FREE_BASE_URL,
+    models: [],
   },
   {
     label: 'OpenCode Zen',

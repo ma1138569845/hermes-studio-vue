@@ -2,9 +2,11 @@ import { randomUUID } from 'node:crypto'
 import { constants as fsConstants } from 'node:fs'
 import { lstat, mkdir, open, rename, rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, join, resolve } from 'node:path'
+import { AGENT_EVENT_BATCH_CAPABILITY, AGENT_EVENT_BATCH_BYTES, AGENT_EVENT_BATCH_COUNT, OutboundRelayEventSink, supportsAgentEventBatching, type RelayAgentEvent } from './agent-relay-event-sink'
 import type { Server, Socket as ServerSocket } from 'socket.io'
 import { io, type Socket as ClientSocket } from 'socket.io-client'
 import { config } from '../../public/config'
+import { groupAgentSocketAuth, normalizeCloudAgentMachineId } from './cloud-agent-auth'
 import { logger } from '../../public/logging'
 import {
   createGroupPrimaryAgentBridge,
@@ -14,7 +16,6 @@ import {
 import {
   AgentClient,
   type AgentConfig,
-  type GroupAgentEventSink,
   type GroupAgentExecutor,
   type GroupChatRunService,
   type MentionMessage,
@@ -93,13 +94,6 @@ type RelayRunRequest = {
     token: string
     access: 'read-write'
   }
-}
-
-type RelayAgentEvent = {
-  runId: string
-  seq: number
-  event: string
-  data: Record<string, unknown>
 }
 
 type PendingRelayRun = {
@@ -353,12 +347,13 @@ function sameRemoteAgent(
 
 class RelayGroupAgentExecutor implements GroupAgentExecutor {
   readonly agentId: string
-  agent: 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok'
+  agent: 'hermes' | 'ekko' | 'codex' | 'claude' | 'pi' | 'grok' | 'opencode' | 'dsh'
   agentMode: 'scoped' | 'global'
   profile: string
   provider: string
   model: string
   apiMode: string
+  agentPreset?: string
   reasoningEffort: string
   name: string
   description: string
@@ -393,6 +388,7 @@ class RelayGroupAgentExecutor implements GroupAgentExecutor {
     this.model = String(agent.model || '')
     this.apiMode = String(agent.apiMode || '')
     this.reasoningEffort = String(agent.reasoningEffort || '')
+    this.agentPreset = agent.agentPreset
     this.name = String(agent.name || this.profile)
     this.description = String(agent.description || '')
     this.avatar = String(agent.avatar || '')
@@ -423,6 +419,7 @@ class RelayGroupAgentExecutor implements GroupAgentExecutor {
     this.model = String(agent.model || '')
     this.apiMode = String(agent.apiMode || '')
     this.reasoningEffort = String(agent.reasoningEffort || '')
+    this.agentPreset = agent.agentPreset
     this.name = String(agent.name || this.profile)
     this.description = String(agent.description || '')
     this.avatar = String(agent.avatar || '')
@@ -776,11 +773,23 @@ class RelayGroupAgentExecutor implements GroupAgentExecutor {
     return task
   }
 
+  async acceptBatch(value: unknown): Promise<void> {
+    const events = (value as any)?.events
+    if (!Array.isArray(events) || !events.length || events.length > AGENT_EVENT_BATCH_COUNT
+      || Buffer.byteLength(JSON.stringify(value)) > AGENT_EVENT_BATCH_BYTES
+      || events.some(event => !event || typeof event !== 'object' || Array.isArray(event)
+        || typeof event.runId !== 'string' || !Number.isSafeInteger(event.seq))) {
+      throw relayError('Invalid remote Agent event batch', 'GROUP_AGENT_EVENT_INVALID')
+    }
+    // Enqueue the whole batch synchronously; run.completed must follow it.
+    await Promise.all(events.map(event => this.acceptEvent(event)))
+  }
+
   private async applyEvent(event: RelayAgentEvent): Promise<void> {
     const pending = this.pendingRun
     if (!pending || event.runId !== pending.runId) throw relayError('Unknown or stale relay run', 'GROUP_AGENT_STALE_RUN')
     if (!Number.isSafeInteger(event.seq) || event.seq !== pending.lastSeq + 1) {
-      throw relayError('Out-of-order relay event', 'GROUP_AGENT_EVENT_SEQUENCE')
+      throw relayError(`Out-of-order relay event (expected ${pending.lastSeq + 1}, received ${String(event.seq)}, event ${String(event.event).slice(0, 80)})`, 'GROUP_AGENT_EVENT_SEQUENCE')
     }
     const data = event.data || {}
     const sessionId = typeof data.agentSessionId === 'string' ? data.agentSessionId.trim() : ''
@@ -1242,6 +1251,7 @@ export class GroupAgentRelayServer {
             model: descriptor.model,
             apiMode: descriptor.apiMode,
             reasoningEffort: descriptor.reasoningEffort,
+            agentPreset: descriptor.agentPreset,
             avatar: descriptor.avatar,
             executorType: 'remote',
             ownerMemberId: request.ownerMemberId,
@@ -1264,6 +1274,7 @@ export class GroupAgentRelayServer {
         model: roomAgent.model,
         apiMode: roomAgent.apiMode,
         reasoningEffort: roomAgent.reasoningEffort,
+        agentPreset: roomAgent.agentPreset,
         name: roomAgent.name,
         description: roomAgent.description,
         invited: 1,
@@ -1331,6 +1342,7 @@ export class GroupAgentRelayServer {
       socket.data.connector = connector
       socket.data.executor = executor
       socket.emit('relay.ready', {
+        capabilities: [AGENT_EVENT_BATCH_CAPABILITY],
         protocolVersion: GROUP_AGENT_RELAY_PROTOCOL_VERSION,
         connectorId: connector.id,
         credential: socket.data.newCredential,
@@ -1346,10 +1358,17 @@ export class GroupAgentRelayServer {
           model: roomAgent.model,
           apiMode: roomAgent.apiMode,
           reasoningEffort: roomAgent.reasoningEffort,
+          agentPreset: roomAgent.agentPreset,
           name: roomAgent.name,
           description: roomAgent.description,
           avatar: roomAgent.avatar,
         },
+      })
+
+      socket.on('agent.events', (batch: unknown, ack?: (response: Record<string, unknown>) => void) => {
+        executor.acceptBatch(batch)
+          .then(() => ack?.({ ok: true }))
+          .catch(error => ack?.({ error: error instanceof Error ? error.message : 'Invalid relay event batch' }))
       })
 
       let lastAgentConfigUpdateAt = 0
@@ -1391,6 +1410,7 @@ export class GroupAgentRelayServer {
                 model: descriptor.model,
                 apiMode: descriptor.apiMode,
                 reasoningEffort: descriptor.reasoningEffort,
+                agentPreset: descriptor.agentPreset,
                 avatar: descriptor.avatar,
               },
             )
@@ -1463,76 +1483,9 @@ export class GroupAgentRelayServer {
   }
 }
 
-class OutboundRelayEventSink implements GroupAgentEventSink {
-  private runId = ''
-  private sequence = 0
-  private secrets: string[] = []
-
-  constructor(private readonly socket: ClientSocket) {}
-
-  get connected(): boolean {
-    return this.socket.connected
-  }
-
-  get id(): string | undefined {
-    return this.socket.id
-  }
-
-  begin(runId: string, secrets: string[] = []): void {
-    this.runId = runId
-    this.sequence = 0
-    this.secrets = secrets.filter(Boolean)
-  }
-
-  end(runId: string): void {
-    if (this.runId !== runId) return
-    this.runId = ''
-    this.sequence = 0
-    this.secrets = []
-  }
-
-  sendMessage(
-    _roomId: string,
-    content: string,
-    messageId?: string,
-    extra?: Record<string, unknown>,
-    agentSessionId?: string,
-  ): Promise<string> {
-    const data = {
-      content,
-      id: messageId,
-      extra,
-      agentSessionId,
-    }
-    return new Promise((resolve, reject) => {
-      this.send('message', data, response => {
-        if (response?.error) reject(relayError(response.error))
-        else resolve(String(messageId || response?.id || ''))
-      })
-    })
-  }
-
-  emit(event: string, payload: Record<string, unknown>): void {
-    this.send(event, payload)
-  }
-
-  private send(event: string, data: Record<string, unknown>, ack?: (response: any) => void): void {
-    if (!this.runId || !this.socket.connected) {
-      ack?.({ error: 'Relay is not connected to an active run' })
-      return
-    }
-    this.sequence += 1
-    this.socket.emit('agent.event', {
-      runId: this.runId,
-      seq: this.sequence,
-      event,
-      data: redactRelaySecrets(data, this.secrets),
-    }, ack)
-  }
-}
-
 type PersistedOutboundLink = {
   cloudOrigin: string
+  cloudMachineId?: string
   targetOrigin: string
   connectorId: string
   credential: string
@@ -1563,13 +1516,13 @@ class OutboundRelayConnection {
   async connect(): Promise<PersistedOutboundLink> {
     const reconnecting = Boolean(this.link.connectorId && this.link.credential)
     this.socket = io(`${this.link.cloudOrigin}/group-chat-agent-relay`, {
-      auth: {
+      auth: groupAgentSocketAuth({
         protocolVersion: GROUP_AGENT_RELAY_PROTOCOL_VERSION,
         targetOrigin: this.link.targetOrigin,
         ...(reconnecting
           ? { connectorId: this.link.connectorId, credential: this.link.credential }
           : { pairingTicket: this.pairingTicket }),
-      },
+      }, this.link.cloudMachineId),
       transports: ['websocket'],
       reconnection: true,
       reconnectionAttempts: Infinity,
@@ -1577,7 +1530,15 @@ class OutboundRelayConnection {
       reconnectionDelayMax: 30_000,
       timeout: 15_000,
     })
-    this.sink = new OutboundRelayEventSink(this.socket)
+    this.sink = new OutboundRelayEventSink(this.socket, redactRelaySecrets, error => {
+      const request = this.activeRequest
+      if (!request) return
+      this.socket?.emit('run.failed', {
+        runId: request.runId,
+        error: String(redactRelaySecrets(error.message, request.workspaceApi?.token ? [request.workspaceApi.token] : [])),
+      })
+      void this.runner?.interrupt(request.room.id).catch(() => undefined)
+    })
     this.bindEvents()
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(relayError('Timed out connecting to group chat Relay')), 15_000)
@@ -1589,7 +1550,7 @@ class OutboundRelayConnection {
           const roomId = boundedRelayText(data.roomId || this.link.roomId || '', 160, 'room id')
           const roomName = boundedRelayText(data.roomName || this.link.roomName || roomId, 120, 'room name')
           const inviteCode = boundedRelayText(data.inviteCode || this.link.inviteCode || '', 160, 'invite code')
-          const relayAgent = normalizeRemoteGroupAgentDescriptor(data.agent)
+          const relayAgent = normalizeRemoteGroupAgentDescriptor(data.agent, 'relay confirmation')
           if (
             !UUID_PATTERN.test(connectorId)
             || !/^[a-zA-Z0-9_-]{40,128}$/.test(credential)
@@ -1606,12 +1567,12 @@ class OutboundRelayConnection {
             ...(inviteCode ? { inviteCode } : {}),
             agent: this.link.agent,
           }
-          this.socket!.auth = {
+          this.socket!.auth = groupAgentSocketAuth({
             protocolVersion: GROUP_AGENT_RELAY_PROTOCOL_VERSION,
             targetOrigin: this.link.targetOrigin,
             connectorId,
             credential,
-          }
+          }, this.link.cloudMachineId)
           void this.manager.persist(this.link)
             .then(() => resolve(this.link))
             .catch(reject)
@@ -1635,6 +1596,7 @@ class OutboundRelayConnection {
   }
 
   close(): void {
+    this.sink?.end(this.activeRequest?.runId || '')
     this.runner?.disconnect()
     this.runner = null
     this.socket?.disconnect()
@@ -1700,6 +1662,10 @@ class OutboundRelayConnection {
 
   private bindEvents(): void {
     const socket = this.socket!
+    socket.on('relay.ready', (data: unknown) => {
+      this.sink?.setBatching(supportsAgentEventBatching(data, Boolean(this.link.cloudMachineId)))
+    })
+    socket.on('disconnect', () => this.sink?.abort(new Error('Remote Agent relay disconnected')))
     socket.on('connector.revoked', (data: { connectorId?: string }) => {
       const connectorId = String(data?.connectorId || this.link.connectorId || '').trim()
       if (!connectorId || connectorId !== this.link.connectorId) return
@@ -1816,7 +1782,9 @@ class OutboundRelayConnection {
           ...(request.workspaceApi
             ? {
                 remoteWorkspaceApi: {
-                  endpoint: `${this.link.cloudOrigin}/api/studio/group-chat/remote-workspace/v1`,
+                  endpoint: this.link.cloudMachineId
+                    ? `${this.link.cloudOrigin}/api/group-agent-relay/${this.link.cloudMachineId}/${this.link.connectorId}/workspace`
+                    : `${this.link.cloudOrigin}/api/studio/group-chat/remote-workspace/v1`,
                   token: request.workspaceApi.token,
                   access: request.workspaceApi.access,
                 },
@@ -1850,6 +1818,7 @@ class OutboundRelayConnection {
           ...extra,
         })
       })
+      await sink.drain()
       socket.emit('run.completed', { runId: request.runId })
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Remote Agent run failed'
@@ -1998,11 +1967,13 @@ export class GroupAgentOutboundRelayManager {
 
   async connect(input: {
     cloudOrigin: string
+    cloudMachineId?: string
     targetOrigin: string
     pairingTicket: string
     agent: RemoteGroupAgentDescriptor
   }): Promise<{ connectorId: string; roomId?: string; roomName?: string; inviteCode?: string }> {
     const cloudOrigin = normalizeOrigin(input.cloudOrigin)
+    const cloudMachineId = normalizeCloudAgentMachineId(input.cloudMachineId)
     const targetOrigin = normalizeOrigin(input.targetOrigin)
     const ticket = String(input.pairingTicket || '').trim()
     if (!ticket) throw new Error('pairingTicket is required')
@@ -2010,6 +1981,7 @@ export class GroupAgentOutboundRelayManager {
     const key = `pairing:${ticket.slice(0, 12)}`
     const connection = new OutboundRelayConnection(this, key, {
       cloudOrigin,
+      ...(cloudMachineId ? { cloudMachineId } : {}),
       targetOrigin,
       connectorId: '',
       credential: '',
@@ -2055,6 +2027,7 @@ export class GroupAgentOutboundRelayManager {
   async listConnections(): Promise<Array<{
     connectorId: string
     cloudOrigin: string
+    cloudMachineId?: string
     targetOrigin: string
     roomId?: string
     roomName?: string
@@ -2068,6 +2041,7 @@ export class GroupAgentOutboundRelayManager {
       return links.map(link => ({
         connectorId: link.connectorId,
         cloudOrigin: link.cloudOrigin,
+        ...(link.cloudMachineId ? { cloudMachineId: link.cloudMachineId } : {}),
         targetOrigin: link.targetOrigin,
         ...(link.roomId ? { roomId: link.roomId } : {}),
         ...(link.roomName ? { roomName: link.roomName } : {}),
@@ -2209,7 +2183,7 @@ export class GroupAgentOutboundRelayManager {
 
   private sameRoomLink(link: PersistedOutboundLink, seed: PersistedOutboundLink): boolean {
     if (!seed.roomId || !link.roomId) return link.connectorId === seed.connectorId
-    return link.cloudOrigin === seed.cloudOrigin && link.roomId === seed.roomId
+    return link.cloudOrigin === seed.cloudOrigin && link.cloudMachineId === seed.cloudMachineId && link.roomId === seed.roomId
   }
 
   private async withPersistenceLock<T>(task: () => Promise<T>): Promise<T> {
@@ -2281,6 +2255,7 @@ export class GroupAgentOutboundRelayManager {
           if (!UUID_PATTERN.test(connectorId) || !/^[a-zA-Z0-9_-]{40,128}$/.test(credential)) continue
           links.push({
             cloudOrigin: normalizeOrigin(link.cloudOrigin),
+            ...(link.cloudMachineId ? { cloudMachineId: normalizeCloudAgentMachineId(link.cloudMachineId) } : {}),
             targetOrigin: normalizeOrigin(link.targetOrigin),
             connectorId,
             credential,

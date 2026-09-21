@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { defineComponent } from 'vue'
 import SkillList from '@/components/hermes/skills/SkillList.vue'
+import { toggleSkill } from '@/api/hermes/skills'
 
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({ t: (key: string) => key }),
@@ -25,6 +26,65 @@ vi.mock('naive-ui', () => ({
 }))
 
 describe('SkillList', () => {
+  it('hides deletion only for shared read-only entries in a writable DSH list', () => {
+    const wrapper = mount(SkillList, {
+      props: {
+        categories: [{ name: 'misc', description: '', skills: [
+          { name: 'shared', description: '', source: 'local', readonly: true },
+          { name: 'private', description: '', source: 'local' },
+        ] }], archived: [], selectedSkill: null, searchQuery: '', sourceFilter: null, toggleable: false,
+      },
+    })
+    expect(wrapper.findAll('.skill-action-btn')).toHaveLength(1)
+    expect(wrapper.text()).toContain('shared')
+    expect(wrapper.text()).toContain('private')
+  })
+  describe.each([null, 'external'] as const)('toggle controls with source filter %s', sourceFilter => {
+    function mountList(options: { readonly?: boolean; toggleable?: boolean } = {}) {
+      return mount(SkillList, {
+        props: {
+          categories: [{
+            name: 'tools',
+            description: '',
+            skills: [{
+              name: 'test-skill',
+              description: '',
+              enabled: true,
+              source: 'external',
+              sourcePath: '~/shared/skills',
+            }],
+          }],
+          archived: [],
+          selectedSkill: null,
+          searchQuery: '',
+          sourceFilter,
+          ...options,
+        },
+      })
+    }
+
+    it('shows the switch by default and disables the skill', async () => {
+      vi.mocked(toggleSkill).mockClear().mockResolvedValue(undefined)
+      const wrapper = mountList()
+      const toggle = wrapper.getComponent({ name: 'NSwitch' })
+
+      expect(toggle.props('value')).toBe(true)
+      toggle.vm.$emit('update:value', false)
+      await vi.waitFor(() => {
+        expect(toggleSkill).toHaveBeenCalledWith('test-skill', false)
+        expect(toggle.props('value')).toBe(false)
+      })
+    })
+
+    it('hides the switch when toggling is explicitly disabled', () => {
+      expect(mountList({ toggleable: false }).findComponent({ name: 'NSwitch' }).exists()).toBe(false)
+    })
+
+    it('hides the switch for readonly skills even when toggling is requested', () => {
+      expect(mountList({ readonly: true, toggleable: true }).findComponent({ name: 'NSwitch' }).exists()).toBe(false)
+    })
+  })
+
   it('supports filtering skills from external sources', () => {
     const wrapper = mount(SkillList, {
       props: {

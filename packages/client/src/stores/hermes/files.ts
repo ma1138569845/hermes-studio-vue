@@ -35,6 +35,11 @@ export function getLanguageFromPath(filePath: string): string {
   return getTextPreviewLanguage(filePath) || 'plaintext'
 }
 
+export type FilePreviewLocation = {
+  startLine: number
+  endLine?: number
+}
+
 // Returns true if `targetPath` is the same as `changedPath` or lives inside it
 // when `changedIsDir` is true. Used to invalidate preview/editor state when
 // the underlying file is deleted or renamed.
@@ -59,6 +64,7 @@ export const useFilesStore = defineStore('files', () => {
   const sortBy = ref<'name' | 'size' | 'modTime'>('name')
   const sortOrder = ref<'asc' | 'desc'>('asc')
   let fetchRequestSeq = 0
+  let previewRequestSeq = 0
 
   const editingFile = ref<{
     path: string
@@ -81,7 +87,18 @@ export const useFilesStore = defineStore('files', () => {
     type: FilePreviewKind
     content?: string
     language?: string
+    startLine?: number
+    endLine?: number
   } | null>(null)
+
+  function beginPreviewRequest(): number {
+    return ++previewRequestSeq
+  }
+
+  function commitPreview(requestSeq: number, file: NonNullable<typeof previewFile.value>): void {
+    if (requestSeq !== previewRequestSeq) return
+    previewFile.value = file
+  }
 
   const pathSegments = computed(() => {
     if (!currentPath.value) return []
@@ -291,9 +308,11 @@ export const useFilesStore = defineStore('files', () => {
     filePath: string,
     fileName = filePath.split('/').pop() || filePath,
     size = -1,
+    location?: FilePreviewLocation,
   ) {
     const type = getFilePreviewKind(fileName || filePath)
     if (!type) return
+    const requestSeq = beginPreviewRequest()
     const common = {
       path: filePath,
       name: fileName,
@@ -301,20 +320,24 @@ export const useFilesStore = defineStore('files', () => {
       profile: null,
       workspaceSessionId: sessionId,
       type,
+      ...(location ? {
+        startLine: location.startLine,
+        endLine: location.endLine ?? location.startLine,
+      } : {}),
     }
     if (type === 'markdown' || type === 'text') {
       const result = await fetchSessionWorkspaceFileText(sessionId, filePath)
-      previewFile.value = type === 'markdown'
+      commitPreview(requestSeq, type === 'markdown'
         ? { ...common, size: result.size, content: result.content }
         : {
             ...common,
             size: result.size,
             content: result.content,
             language: getLanguageFromPath(filePath),
-          }
+          })
       return
     }
-    previewFile.value = common
+    commitPreview(requestSeq, common)
   }
 
   async function openGroupWorkspacePreview(
@@ -322,9 +345,11 @@ export const useFilesStore = defineStore('files', () => {
     filePath: string,
     fileName = filePath.split('/').pop() || filePath,
     size = -1,
+    location?: FilePreviewLocation,
   ) {
     const type = getFilePreviewKind(fileName || filePath)
     if (!type) return
+    const requestSeq = beginPreviewRequest()
     const common = {
       path: filePath,
       name: fileName,
@@ -333,15 +358,19 @@ export const useFilesStore = defineStore('files', () => {
       workspaceSessionId: null,
       workspaceRoomId: roomId,
       type,
+      ...(location ? {
+        startLine: location.startLine,
+        endLine: location.endLine ?? location.startLine,
+      } : {}),
     }
     if (type === 'markdown' || type === 'text') {
       const result = await fetchGroupWorkspaceFileText(roomId, filePath)
-      previewFile.value = type === 'markdown'
+      commitPreview(requestSeq, type === 'markdown'
         ? { ...common, size: result.size, content: result.content }
-        : { ...common, size: result.size, content: result.content, language: getLanguageFromPath(filePath) }
+        : { ...common, size: result.size, content: result.content, language: getLanguageFromPath(filePath) })
       return
     }
-    previewFile.value = common
+    commitPreview(requestSeq, common)
   }
 
   async function openRemotePreview(
@@ -373,7 +402,10 @@ export const useFilesStore = defineStore('files', () => {
     return true
   }
 
-  function closePreview() { previewFile.value = null }
+  function closePreview() {
+    previewRequestSeq += 1
+    previewFile.value = null
+  }
 
   function selectDirectory(path: string) { currentPath.value = path }
 

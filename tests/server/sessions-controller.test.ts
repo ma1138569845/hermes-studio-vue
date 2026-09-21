@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdir, mkdtemp, rm, symlink, truncate, writeFile } from 'fs/promises'
+import { mkdir, mkdtemp, readFile, rm, symlink, truncate, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
-import { join } from 'path'
+import { basename, join } from 'path'
 
 const hermesTestHome = join(tmpdir(), 'hermes-test')
 
@@ -22,11 +22,14 @@ const getUsageStatsFromDbMock = vi.fn()
 const getSessionMock = vi.fn()
 const deleteHermesSessionForProfileMock = vi.fn()
 const localListSessionsMock = vi.fn()
+const localCountSessionsMock = vi.fn()
 const localGetSessionDetailMock = vi.fn()
+const localGetSessionDetailPaginatedMock = vi.fn()
 const localSearchSessionsMock = vi.fn()
 const localDeleteSessionMock = vi.fn()
 const localRenameSessionMock = vi.fn()
 const localSetSessionArchivedMock = vi.fn()
+const localSetSessionPinnedMock = vi.fn()
 const localSetSessionPushEnabledMock = vi.fn()
 const localCreateSessionMock = vi.fn()
 const localUpdateSessionMock = vi.fn()
@@ -56,6 +59,7 @@ const agentStatusMocks = vi.hoisted(() => ({ hermesAvailable: true }))
 const codingAgentRunManagerMock = vi.hoisted(() => ({
   stop: vi.fn(),
 }))
+const invalidateCodingAgentSessionRuntimeMock = vi.hoisted(() => vi.fn())
 
 vi.mock('../../packages/server/src/modules/hermes/services/history/conversations-db', () => ({
   listConversationSummariesFromDb: listConversationSummariesFromDbMock,
@@ -101,12 +105,15 @@ vi.mock('../../packages/server/src/modules/hermes/services/history/sessions-db',
 
 vi.mock('../../packages/server/src/modules/studio/repositories/session-store', () => ({
   listSessions: localListSessionsMock,
+  countSessions: localCountSessionsMock,
   searchSessions: localSearchSessionsMock,
   getSessionDetail: localGetSessionDetailMock,
+  getSessionDetailPaginated: localGetSessionDetailPaginatedMock,
   deleteSession: localDeleteSessionMock,
   renameSession: localRenameSessionMock,
   setSessionArchived: localSetSessionArchivedMock,
   setSessionPushEnabled: localSetSessionPushEnabledMock,
+  setSessionPinned: localSetSessionPinnedMock,
   createSession: localCreateSessionMock,
   addMessages: localAddMessagesMock,
   getSession: getSessionMock,
@@ -241,6 +248,11 @@ vi.mock('../../packages/server/src/modules/studio/public/session-agent-runtime',
     )
   },
   stopCodingAgentSessionRun: codingAgentRunManagerMock.stop,
+  invalidateCodingAgentSessionRuntime: invalidateCodingAgentSessionRuntimeMock,
+}))
+
+vi.mock('../../packages/server/src/modules/studio/services/task-plans', () => ({
+  getSessionTaskPlans: () => [],
 }))
 
 vi.mock('../../packages/server/src/modules/studio/public/agent-status-registry', () => ({
@@ -264,11 +276,13 @@ describe('session conversations controller', () => {
     getSessionMock.mockReset()
     deleteHermesSessionForProfileMock.mockReset()
     localListSessionsMock.mockReset()
+    localCountSessionsMock.mockReset().mockReturnValue(0)
     localGetSessionDetailMock.mockReset()
     localSearchSessionsMock.mockReset()
     localDeleteSessionMock.mockReset()
     localRenameSessionMock.mockReset()
     localSetSessionArchivedMock.mockReset()
+    localSetSessionPinnedMock.mockReset()
     localSetSessionPushEnabledMock.mockReset()
     localCreateSessionMock.mockReset()
     localUpdateSessionMock.mockReset()
@@ -319,6 +333,20 @@ describe('session conversations controller', () => {
     bridgeGetRuntimeStateMock.mockReset()
     bridgeGetRuntimeStateMock.mockReturnValue({ ready: false, running: false, endpoint: 'ipc:///tmp/hermes-agent-bridge.sock' })
     codingAgentRunManagerMock.stop.mockReset()
+    invalidateCodingAgentSessionRuntimeMock.mockReset()
+  })
+
+  it('returns shared session agent and workspace metadata without account secrets', async () => {
+    localGetSessionDetailPaginatedMock.mockReturnValue({
+      session: { id: 'shared', profile: 'default', source: 'coding_agent', agent: 'codex', agent_mode: 'scoped', coding_agent_id: 'codex', workspace: '/project', api_key: 'private', parent_title: 'private parent' },
+      messages: [], total: 0, offset: 0, limit: 1, hasMore: false,
+    })
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    const ctx: any = { params: { id: 'shared' }, query: { limit: '1' }, state: { sessionShare: {} } }
+    await mod.getConversationMessagesPaginated(ctx)
+    expect(ctx.body.session).toMatchObject({ agent: 'codex', coding_agent_id: 'codex', agent_mode: 'scoped', workspace: '/project' })
+    expect(ctx.body.session).not.toHaveProperty('api_key')
+    expect(ctx.body.session.parent_title).toBeUndefined()
   })
 
   it('lists conversations from the local session store', async () => {
@@ -411,28 +439,53 @@ describe('session conversations controller', () => {
         params: { id: 'session-preview' },
         query: { path: join(outside, 'secret.pdf') },
         state: { user: { id: 1, role: 'super_admin' } },
+        set: vi.fn(),
         body: null,
       }
       await mod.readWorkspaceFileContent(absoluteOutsideCtx)
-      expect(absoluteOutsideCtx).toMatchObject({ status: 400, body: { code: 'invalid_path' } })
+      expect(absoluteOutsideCtx.body).toEqual(Buffer.from('%PDF secret'))
 
       const traversalCtx: any = {
         params: { id: 'session-preview' },
-        query: { path: '../secret.pdf' },
+        query: { path: `../${basename(outside)}/secret.pdf` },
         state: { user: { id: 1, role: 'super_admin' } },
+        set: vi.fn(),
         body: null,
       }
       await mod.readWorkspaceFileContent(traversalCtx)
-      expect(traversalCtx).toMatchObject({ status: 400, body: { code: 'invalid_path' } })
+      expect(traversalCtx.body).toEqual(Buffer.from('%PDF secret'))
 
       const escapedCtx: any = {
         params: { id: 'session-preview' },
         query: { path: 'escaped.pdf' },
         state: { user: { id: 1, role: 'super_admin' } },
+        set: vi.fn(),
         body: null,
       }
       await mod.readWorkspaceFileContent(escapedCtx)
-      expect(escapedCtx).toMatchObject({ status: 400, body: { code: 'invalid_path' } })
+      expect(escapedCtx.body).toEqual(Buffer.from('%PDF secret'))
+
+      const absoluteWritePath = join(outside, 'written.txt')
+      const writeCtx: any = {
+        params: { id: 'session-preview' },
+        request: { body: { path: absoluteWritePath, content: 'written outside workspace' } },
+        state: { user: { id: 1, role: 'super_admin' } },
+        body: null,
+      }
+      await mod.writeWorkspaceFile(writeCtx)
+      expect(writeCtx.body).toMatchObject({ ok: true })
+      await expect(readFile(absoluteWritePath, 'utf8')).resolves.toBe('written outside workspace')
+
+      listUserProfilesMock.mockReturnValue([{ profile_name: 'research' }])
+      const regularAdminOutsideCtx: any = {
+        params: { id: 'session-preview' },
+        query: { path: join(outside, 'secret.pdf') },
+        state: { user: { id: 2, role: 'admin' } },
+        set: vi.fn(),
+        body: null,
+      }
+      await mod.readWorkspaceFileContent(regularAdminOutsideCtx)
+      expect(regularAdminOutsideCtx.body).toEqual(Buffer.from('%PDF secret'))
 
       const oversizedCtx: any = {
         params: { id: 'session-preview' },
@@ -976,6 +1029,85 @@ describe('session conversations controller', () => {
     })
   })
 
+  it('returns a single-chat page with a lookahead row without changing legacy list responses', async () => {
+    localCountSessionsMock.mockReturnValue(5)
+    localListSessionsMock.mockReturnValue([
+      { id: 'chat-3', profile: 'travel', source: 'cli' },
+      { id: 'chat-2', profile: 'travel', source: 'cli' },
+      { id: 'chat-1', profile: 'travel', source: 'cli' },
+    ])
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    const ctx: any = { query: { profile: 'travel', offset: '2', limit: '2' }, state: {}, body: null }
+    await mod.list(ctx)
+    expect(localListSessionsMock).toHaveBeenCalledWith('travel', undefined, 3, expect.objectContaining({ offset: 2 }))
+    expect(ctx.body).toEqual({
+      sessions: [
+        expect.objectContaining({ id: 'chat-3' }),
+        expect.objectContaining({ id: 'chat-2' }),
+      ],
+      hasMore: true, offset: 2, limit: 2, total: 5,
+    })
+    localListSessionsMock.mockReturnValue([{ id: 'chat-1', profile: 'travel', source: 'cli' }])
+    ctx.query.offset = '4'
+    await mod.list(ctx)
+    expect(ctx.body).toMatchObject({ hasMore: false, offset: 4, limit: 2, total: 5 })
+    localCountSessionsMock.mockClear()
+    delete ctx.query.offset
+    await mod.list(ctx)
+    expect(ctx.body).not.toHaveProperty('hasMore')
+    expect(ctx.body).not.toHaveProperty('total')
+    expect(localCountSessionsMock).not.toHaveBeenCalled()
+  })
+
+  it.each(['-1', 'NaN', '1.5'])('normalizes invalid single-chat offsets (%s)', async (offset) => {
+    localListSessionsMock.mockReturnValue([])
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    const ctx: any = { query: { offset, limit: '10' }, state: {}, body: null }
+    await mod.list(ctx)
+    expect(ctx.body).toEqual({ sessions: [], hasMore: false, offset: 0, limit: 10, total: 0 })
+  })
+
+  it.each([['7', 7], ['none', null]])('passes category %s and pin filters into the paginated query', async (category, categoryId) => {
+    localListSessionsMock.mockReturnValue([])
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    const ctx: any = { query: { category, offset: '10', limit: '10', exclude: ['pin-a', 'pin-b'] }, state: {}, body: null }
+    await mod.list(ctx)
+    expect(localListSessionsMock).toHaveBeenLastCalledWith(undefined, undefined, 11, expect.objectContaining({
+      categoryId, offset: 10, excludeSessionIds: ['pin-a', 'pin-b'],
+    }))
+    expect(localCountSessionsMock).toHaveBeenLastCalledWith(undefined, undefined, expect.objectContaining({
+      categoryId, excludeSessionIds: ['pin-a', 'pin-b'], includeArchived: false,
+    }))
+    ctx.query = { include: 'pin-a', offset: '0', limit: '10' }
+    await mod.list(ctx)
+    expect(localListSessionsMock).toHaveBeenLastCalledWith(undefined, undefined, 11, expect.objectContaining({ includeSessionIds: ['pin-a'] }))
+    expect(localCountSessionsMock).toHaveBeenLastCalledWith(undefined, undefined, expect.objectContaining({ includeSessionIds: ['pin-a'] }))
+  })
+
+  it('counts only accessible profiles and does not reveal totals for a forbidden explicit profile', async () => {
+    localListSessionsMock.mockReturnValue([])
+    localCountSessionsMock.mockReturnValue(27)
+    listUserProfilesMock.mockReturnValue([{ profile_name: 'default' }])
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    const ctx: any = { query: { offset: '0', limit: '10' }, state: { user: { id: 'user-1', role: 'user' } } }
+    await mod.list(ctx)
+    expect(ctx.body.total).toBe(27)
+    expect(localCountSessionsMock).toHaveBeenLastCalledWith(undefined, undefined, expect.objectContaining({ profiles: ['default'] }))
+    localCountSessionsMock.mockClear()
+    ctx.query.profile = 'travel'
+    await mod.list(ctx)
+    expect(ctx.body.total).toBe(0)
+    expect(localCountSessionsMock).not.toHaveBeenCalled()
+  })
+
+  it.each(['invalid', '-1', '1.5'])('rejects invalid session category %s', async category => {
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    const ctx: any = { query: { category, offset: '0' }, state: {}, body: null }
+    await mod.list(ctx)
+    expect(ctx.status).toBe(400)
+    expect(localListSessionsMock).not.toHaveBeenCalled()
+  })
+
   it('lists only global-agent sessions when requested by source', async () => {
     localListSessionsMock.mockReturnValue([
       { id: 'global-1', profile: 'default', source: 'global_agent' },
@@ -1318,6 +1450,51 @@ describe('session conversations controller', () => {
 
     expect(localSetSessionArchivedMock).toHaveBeenCalledWith('session-1', true)
     expect(ctx.body).toEqual({ ok: true })
+  })
+
+  it('updates the database pin flag and validates input and profile access', async () => {
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    getSessionMock.mockReturnValue({ id: 'session-1', profile: 'default' })
+    localSetSessionPinnedMock.mockReturnValue(true)
+    const ctx: any = { params: { id: 'session-1' }, request: { body: { is_pinned: true } }, state: {} }
+    await mod.setPinned(ctx)
+    expect(localSetSessionPinnedMock).toHaveBeenCalledWith('session-1', true)
+    expect(ctx.body).toEqual({ ok: true, is_pinned: true })
+
+    localSetSessionPinnedMock.mockClear()
+    ctx.request.body.is_pinned = 'true'
+    await mod.setPinned(ctx)
+    expect(ctx.status).toBe(400)
+    expect(localSetSessionPinnedMock).not.toHaveBeenCalled()
+
+    ctx.request.body.is_pinned = false
+    ctx.state = { user: { id: 7, role: 'admin' } }
+    listUserProfilesMock.mockReturnValue([{ profile_name: 'other' }])
+    await mod.setPinned(ctx)
+    expect(ctx.status).toBe(403)
+    expect(localSetSessionPinnedMock).not.toHaveBeenCalled()
+
+    getSessionMock.mockReturnValue(null)
+    await mod.setPinned(ctx)
+    expect(ctx.status).toBe(404)
+  })
+
+  it('supports the pinned category without treating it as a numeric category', async () => {
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    localListSessionsMock.mockReturnValue([])
+    const ctx: any = { query: { category: 'pinned' }, state: {} }
+    await mod.list(ctx)
+    expect(localListSessionsMock).toHaveBeenCalledWith(undefined, undefined, 2000, expect.objectContaining({ pinned: true }))
+    expect(ctx.body).toEqual({ sessions: [] })
+  })
+
+  it('excludes database pins from both category pages and their totals', async () => {
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    localListSessionsMock.mockReturnValue([])
+    const ctx: any = { query: { category: '1', pinned: 'false', offset: '0', limit: '10' }, state: {} }
+    await mod.list(ctx)
+    expect(localListSessionsMock).toHaveBeenCalledWith(undefined, undefined, 11, expect.objectContaining({ categoryId: 1, pinned: false, offset: 0 }))
+    expect(localCountSessionsMock).toHaveBeenCalledWith(undefined, undefined, expect.objectContaining({ categoryId: 1, pinned: false }))
   })
 
   it('updates whether an accessible session should be pushed', async () => {
@@ -1670,6 +1847,19 @@ describe('session conversations controller', () => {
     expect(ctx.body.sessions).toEqual([expect.objectContaining({ id: 'local-history' })])
   })
 
+  it('includes database-pinned history even when it falls outside the source page', async () => {
+    agentStatusMocks.hermesAvailable = false
+    localListSessionsMock.mockReturnValue([
+      { id: 'old-pin', profile: 'default', source: 'api_server', last_active: 1, is_pinned: 1 },
+      { id: 'new', profile: 'default', source: 'api_server', last_active: 100, is_pinned: 0 },
+    ])
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    const ctx: any = { query: { limit: '1' }, state: {} }
+    await mod.listHermesSessionGroups(ctx)
+    expect(ctx.body.groups[0].sessions.map((s: any) => s.id)).toEqual(['new'])
+    expect(ctx.body.included).toEqual([expect.objectContaining({ id: 'old-pin', is_pinned: 1 })])
+  })
+
   it('groups only Studio-local history when Hermes is unavailable', async () => {
     agentStatusMocks.hermesAvailable = false
     localListSessionsMock.mockReturnValue([{
@@ -2012,6 +2202,19 @@ describe('session conversations controller', () => {
       reasoning_effort: 'high',
     })
     expect(ctx.body).toEqual({ ok: true, reasoning_effort: 'high' })
+  })
+
+  it('restarts a Grok runtime after changing session reasoning effort', async () => {
+    getSessionMock.mockReturnValue({ id: 'grok-session', profile: 'default', agent: 'grok' })
+
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    await mod.setReasoningEffort({
+      params: { id: 'grok-session' },
+      request: { body: { reasoningEffort: 'max' } },
+      body: null,
+    } as any)
+
+    expect(invalidateCodingAgentSessionRuntimeMock).toHaveBeenCalledWith('grok-session')
   })
 
   it('deletes a current-profile Hermes history session even when no local Web UI session exists', async () => {

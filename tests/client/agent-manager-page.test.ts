@@ -272,7 +272,7 @@ describe('Agent Manager page', () => {
     expect(hermesCard.text()).not.toContain('/Users/test/.local/bin/hermes')
     expect(hermesCard.get('[data-testid="hermes-source-type"]').text()).toBe('Runtime')
     expect(hermesCard.findAll('button').map(button => button.text()))
-      .toEqual(['agentManager.manageRuntime', 'sidebar.settings'])
+      .toEqual(['sidebar.settings', 'agentManager.manageRuntime'])
     expect(wrapper.findComponent({ name: 'VersionManagementModal' }).exists()).toBe(true)
     expect(api.fetchAgentStatusSnapshot).toHaveBeenCalledOnce()
     expect(api.fetchRuntimeVersionStatus).not.toHaveBeenCalled()
@@ -288,7 +288,7 @@ describe('Agent Manager page', () => {
     expect(wrapper.get('[data-testid="agent-card-codex"]').text()).toContain('agentManager.codingAgentDescription')
     expect(wrapper.get('[data-testid="agent-card-codex"]').text()).toContain('codingAgents.installNow')
     expect(wrapper.get('.coding-agent-grid').findAll('.agent-card').map(card => card.attributes('data-testid')))
-      .toEqual(['agent-card-ekko', 'agent-card-hermes', 'agent-card-claude-code', 'agent-card-codex', 'agent-card-pi', 'agent-card-grok'])
+      .toEqual(['agent-card-ekko', 'agent-card-hermes', 'agent-card-claude-code', 'agent-card-codex', 'agent-card-pi', 'agent-card-grok', 'agent-card-opencode', 'agent-card-dsh'])
   })
 
   it('detects the CLI before offering Runtime management in the desktop shell', async () => {
@@ -322,7 +322,7 @@ describe('Agent Manager page', () => {
     expect(hermesCard.text()).not.toContain('/Users/test/.local/bin/hermes')
     expect(hermesCard.get('[data-testid="hermes-source-type"]').text()).toBe('CLI')
     expect(hermesCard.findAll('button').map(button => button.text()))
-      .toEqual(['runtimeVersions.viewCliDetails', 'sidebar.settings'])
+      .toEqual(['sidebar.settings', 'runtimeVersions.viewCliDetails'])
     expect(api.fetchRuntimeVersionStatus).not.toHaveBeenCalled()
     expect(wrapper.getComponent({ name: 'VersionManagementModal' }).props('show')).toBe(false)
 
@@ -446,7 +446,7 @@ describe('Agent Manager page', () => {
 
     expect(claudeCard.find('.update-alert').exists()).toBe(false)
     expect(claudeCard.findAll('button').map(button => button.text()))
-      .toContain('agentManager.updateToVersion:2.1.0')
+      .toContain('agentManager.updateToVersion:v2.1.0')
   })
 
   it('only probes installed Agents after the user clicks refresh', async () => {

@@ -6,6 +6,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  rmSync,
   writeFileSync,
 } from 'node:fs'
 import { homedir } from 'node:os'
@@ -71,11 +72,11 @@ function executableForShim(options: Required<Pick<CliShimInstallOptions, 'env' |
 }
 
 export function shimPathForPlatform(binDir: string, platform: NodeJS.Platform = process.platform): string {
-  return join(binDir, platform === 'win32' ? 'hermes-studio.cmd' : 'hermes-studio')
+  return join(binDir, platform === 'win32' ? 'ekko-studio.cmd' : 'ekko-studio')
 }
 
 export function mcpShimPathForPlatform(binDir: string, platform: NodeJS.Platform = process.platform): string {
-  return join(binDir, platform === 'win32' ? 'hermes-studio-mcp.cmd' : 'hermes-studio-mcp')
+  return join(binDir, platform === 'win32' ? 'ekko-studio-mcp.cmd' : 'ekko-studio-mcp')
 }
 
 function shellQuote(value: string): string {
@@ -125,11 +126,11 @@ function powershellUtf8Value(value: string): string {
   return `[System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${utf8Base64(value)}'))`
 }
 
-function windowsPowerShellSidecarName(name: 'hermes-studio' | 'hermes-studio-mcp'): string {
+function windowsPowerShellSidecarName(name: 'ekko-studio' | 'ekko-studio-mcp'): string {
   return `${name}.ps1`
 }
 
-function windowsCmdShimContent(name: 'hermes-studio' | 'hermes-studio-mcp', marker: string): string {
+function windowsCmdShimContent(name: 'ekko-studio' | 'ekko-studio-mcp', marker: string): string {
   return [
     '@echo off',
     `rem ${marker}`,
@@ -160,7 +161,7 @@ export function createPowerShellShimContent(
     '  $ForwardArgs = [string[]]$CommandArgs[1..($CommandArgs.Count - 1)]',
     '}',
     'function Show-HermesStudioHelp {',
-    "  [Console]::Out.WriteLine('Usage: hermes-studio [command] [options]')",
+    "  [Console]::Out.WriteLine('Usage: ekko-studio [command] [options]')",
     "  [Console]::Out.WriteLine('')",
     "  [Console]::Out.WriteLine('Commands:')",
     "  [Console]::Out.WriteLine('  (no command)       Open DechnicAuditor desktop app')",
@@ -221,7 +222,7 @@ export function createShimContent(
   webUiScriptPath = resolve(process.cwd(), 'bin', 'hermes-web-ui.mjs'),
 ): string {
   if (platform === 'win32') {
-    return windowsCmdShimContent('hermes-studio', SHIM_MARKER)
+    return windowsCmdShimContent('ekko-studio', SHIM_MARKER)
   }
 
   return [
@@ -232,7 +233,7 @@ export function createShimContent(
     `WEBUI_SCRIPT=${shellQuote(webUiScriptPath)}`,
     'show_help() {',
     '  cat <<\'EOF\'',
-    'Usage: hermes-studio [command] [options]',
+    'Usage: ekko-studio [command] [options]',
     '',
     'Commands:',
     '  (no command)       Open DechnicAuditor desktop app',
@@ -288,7 +289,7 @@ export function createMcpShimContent(
   platform: NodeJS.Platform = process.platform,
 ): string {
   if (platform === 'win32') {
-    return windowsCmdShimContent('hermes-studio-mcp', MCP_SHIM_MARKER)
+    return windowsCmdShimContent('ekko-studio-mcp', MCP_SHIM_MARKER)
   }
 
   return [
@@ -314,7 +315,7 @@ export function createMcpShimContent(
     'fi',
     'export HERMES_WEB_UI_URL',
     'if [ -z "${HERMES_MCP_SERVER_NAME:-}" ]; then',
-    '  HERMES_MCP_SERVER_NAME=hermes-studio-mcp',
+    '  HERMES_MCP_SERVER_NAME=ekko-studio-mcp',
     'fi',
     'export HERMES_MCP_SERVER_NAME',
     'exec "$NODE" "$SCRIPT" "$@"',
@@ -349,7 +350,7 @@ export function createMcpPowerShellShimContent(
     '  }',
     '}',
     "if ([string]::IsNullOrWhiteSpace($env:HERMES_MCP_SERVER_NAME)) {",
-    "  $env:HERMES_MCP_SERVER_NAME = 'hermes-studio-mcp'",
+    "  $env:HERMES_MCP_SERVER_NAME = 'ekko-studio-mcp'",
     '}',
     '& $Node $Script @args',
     'exit $LASTEXITCODE',
@@ -403,7 +404,7 @@ function shellProfilePaths(homeDir: string, platform: NodeJS.Platform, env: Node
 
   const shell = env.SHELL?.trim() || ''
   const name = shell.split('/').pop() || ''
-  if (name === 'fish') return [join(homeDir, '.config', 'fish', 'conf.d', 'hermes-studio.fish')]
+  if (name === 'fish') return [join(homeDir, '.config', 'fish', 'conf.d', 'ekko-studio.fish')]
   if (name === 'bash') return [join(homeDir, '.bash_profile'), join(homeDir, '.bashrc')]
   if (name === 'zsh' || platform === 'darwin') return [join(homeDir, '.zprofile'), join(homeDir, '.zshrc')]
   return [join(homeDir, '.profile')]
@@ -541,6 +542,17 @@ export async function installHermesStudioCliShim(options: CliShimInstallOptions 
         SHIM_MARKER,
       )
     : writeShim(shimPath, commandContent, platform)
+  if (status !== 'skipped') {
+    const oldPaths = platform === 'win32'
+      ? [join(binDir, 'hermes-studio.cmd'), join(binDir, 'hermes-studio.ps1')]
+      : [join(binDir, 'hermes-studio')]
+    // Remove the old managed command, without touching user-owned commands or
+    // a Windows sidecar that a custom command may still depend on.
+    const existingOldPaths = oldPaths.filter(path => existsSync(path))
+    if (existingOldPaths.every(path => isManagedShim(readFileSync(path, 'utf-8'), SHIM_MARKER))) {
+      for (const path of existingOldPaths) rmSync(path)
+    }
+  }
   const pathUpdated = await ensureUserBinOnPath(homeDir, binDir, platform, env).catch((err) => {
     console.warn(`[cli-shim] failed to update PATH: ${err instanceof Error ? err.message : String(err)}`)
     return false
@@ -561,7 +573,7 @@ export async function installHermesStudioMcpShim(options: McpShimInstallOptions 
   const binDir = resolve(homeDir, 'bin')
   const shimPath = mcpShimPathForPlatform(binDir, platform)
   const nodePath = options.nodePath || process.execPath
-  const scriptPath = options.scriptPath || resolve(process.cwd(), 'bin', 'hermes-studio-mcp.mjs')
+  const scriptPath = options.scriptPath || resolve(process.cwd(), 'bin', 'ekko-studio-mcp.mjs')
   const webUiUrl = options.webUiUrl || 'http://127.0.0.1:8748'
 
   mkdirSync(binDir, { recursive: true })
@@ -574,6 +586,19 @@ export async function installHermesStudioMcpShim(options: McpShimInstallOptions 
         MCP_SHIM_MARKER,
       )
     : writeShim(shimPath, commandContent, platform, MCP_SHIM_MARKER)
+  const legacyShimPath = join(binDir, platform === 'win32' ? 'hermes-studio-mcp.cmd' : 'hermes-studio-mcp')
+  if (status !== 'skipped') {
+    if (platform === 'win32') {
+      writeWindowsShimPair(
+        legacyShimPath,
+        commandContent.replace('ekko-studio-mcp.ps1', 'hermes-studio-mcp.ps1'),
+        createMcpPowerShellShimContent(nodePath, scriptPath, webUiUrl),
+        MCP_SHIM_MARKER,
+      )
+    } else {
+      writeShim(legacyShimPath, commandContent, platform, MCP_SHIM_MARKER)
+    }
+  }
   const pathUpdated = await ensureUserBinOnPath(homeDir, binDir, platform, env).catch((err) => {
     console.warn(`[cli-shim] failed to update PATH: ${err instanceof Error ? err.message : String(err)}`)
     return false

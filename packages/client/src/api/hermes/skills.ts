@@ -1,13 +1,14 @@
 import { request, getBaseUrlValue, getApiKey, getActiveProfileName } from '../client'
 
 export type SkillSource = 'builtin' | 'hub' | 'local' | 'external'
-export type SkillTarget = 'hermes' | 'claude' | 'codex' | 'pi' | 'grok'
+export type SkillTarget = 'hermes' | 'claude' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh'
 
 export interface SkillInfo {
   name: string
   description: string
   enabled?: boolean
   source?: SkillSource
+  readonly?: boolean
   modified?: boolean
   patchCount?: number
   useCount?: number
@@ -122,8 +123,12 @@ function targetQuery(target: SkillTarget = 'hermes'): string {
   return `?target=${encodeURIComponent(target)}`
 }
 
+function encodeSkillPath(path: string): string {
+  return path.split('/').map(segment => encodeURIComponent(segment)).join('/')
+}
+
 export async function fetchSkillContent(skillPath: string, target: SkillTarget = 'hermes'): Promise<string> {
-  const res = await request<{ content: string }>(`/api/hermes/skills/${skillPath}${targetQuery(target)}`)
+  const res = await request<{ content: string }>(`/api/hermes/skills/${encodeSkillPath(skillPath)}${targetQuery(target)}`)
   return res.content
 }
 
@@ -142,7 +147,8 @@ export async function saveSkillContent(
 }
 
 export async function fetchSkillFiles(category: string, skill: string, target: SkillTarget = 'hermes'): Promise<SkillFileEntry[]> {
-  const res = await request<{ files: SkillFileEntry[] }>(`/api/hermes/skills/${category}/${skill}/files${targetQuery(target)}`)
+  const path = encodeSkillPath(`${category}/${skill}`)
+  const res = await request<{ files: SkillFileEntry[] }>(`/api/hermes/skills/${path}/files${targetQuery(target)}`)
   return res.files
 }
 
@@ -183,10 +189,10 @@ export async function saveExternalDirs(dirs: string[]): Promise<void> {
   })
 }
 
-export async function deleteSkillApi(category: string, name: string): Promise<void> {
+export async function deleteSkillApi(category: string, name: string, target: SkillTarget = 'hermes'): Promise<void> {
   const c = encodeURIComponent(category)
   const n = encodeURIComponent(name)
-  await request(`/api/hermes/skills/${c}/${n}`, { method: 'DELETE' })
+  await request(`/api/hermes/skills/${c}/${n}${targetQuery(target)}`, { method: 'DELETE' })
 }
 
 /**
@@ -195,7 +201,7 @@ export async function deleteSkillApi(category: string, name: string): Promise<vo
  * starts with the skill folder name; we forward those paths verbatim as the
  * `filename` parameter so the server can reconstruct the directory tree.
  */
-export async function importSkill(files: File[], category?: string): Promise<{ name: string }> {
+export async function importSkill(files: File[], category?: string, target: SkillTarget = 'hermes'): Promise<{ name: string }> {
   const baseUrl = getBaseUrlValue()
   const token = getApiKey()
   const headers: Record<string, string> = {}
@@ -210,7 +216,7 @@ export async function importSkill(files: File[], category?: string): Promise<{ n
   }
   if (category) formData.append('category', category)
 
-  const res = await fetch(`${baseUrl}/api/hermes/skills/import`, {
+  const res = await fetch(`${baseUrl}/api/hermes/skills/import${targetQuery(target)}`, {
     method: 'POST',
     headers,
     body: formData,

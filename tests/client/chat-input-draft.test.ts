@@ -144,6 +144,31 @@ describe('ChatInput draft persistence', () => {
     expect(wrapper.get('.attachment-file').text()).toContain('notes.txt')
   })
 
+  it('shows the full uploaded image in a lightbox before sending', async () => {
+    const wrapper = mountForSession('session-image-preview')
+    const image = new File(['image'], 'wide-screenshot.png', { type: 'image/png' })
+    const input = wrapper.get('input[type="file"]')
+    Object.defineProperty(input.element, 'files', { configurable: true, value: [image] })
+
+    await input.trigger('change')
+    await nextTick()
+
+    const thumb = wrapper.get('.attachment-thumb')
+    expect(thumb.attributes('src')).toBe('blob:chat-attachment')
+    expect(wrapper.get('.attachment-thumb-button').attributes('aria-label')).toBe('wide-screenshot.png')
+
+    await wrapper.get('.attachment-thumb-button').trigger('click')
+    await nextTick()
+
+    const lightbox = document.body.querySelector('.image-preview-overlay')
+    expect(lightbox).not.toBeNull()
+    expect(lightbox?.querySelector('img')?.getAttribute('src')).toBe('blob:chat-attachment')
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    await nextTick()
+    expect(document.body.querySelector('.image-preview-overlay')).toBeNull()
+  })
+
   it('sends extracted video frames to the model without showing them as separate attachments', async () => {
     const wrapper = mountForSession('session-video')
     const chatStore = useChatStore()
@@ -365,6 +390,18 @@ describe('ChatInput draft persistence', () => {
     expect(store.sessions[0].reasoningEffort).toBe('high')
     expect(wrapper.get('.reasoning-effort-button').attributes('style')).toContain('--reasoning-effort-accent-color: #f9c33c')
     expect(wrapper.get('.n-slider-stub').classes()).not.toContain('reasoning-effort-slider--max')
+  })
+
+  it.each(['opencode', 'codex', 'claude', 'pi', 'grok'] as const)('shows the supported commands for %s', async agent => {
+    const wrapper = mountForSession(`session-commands-${agent}`, { source: 'coding_agent', agent })
+    await wrapper.get('textarea').setValue('/')
+    await nextTick()
+    const commands = wrapper.findAll('.slash-command-item').map(item => item.text())
+    for (const name of ['context', 'usage', 'status']) {
+      expect(commands.some(text => text.includes(`/${name}`))).toBe(true)
+    }
+    expect(commands.some(text => text.includes('/compact'))).toBe(agent !== 'opencode')
+    wrapper.unmount()
   })
 
   it('opens the skill picker from /skill and inserts the selected skill command', async () => {

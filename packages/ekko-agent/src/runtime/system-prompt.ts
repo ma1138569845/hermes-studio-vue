@@ -3,6 +3,7 @@ export interface SystemPromptInput {
   runtimeInstructions?: string[]
   userSystemMessages?: string[]
   memoryContext?: string
+  planningEnabled?: boolean
   clarificationEnabled?: boolean
   skillDiscoveryEnabled?: boolean
   skillManagementEnabled?: boolean
@@ -38,6 +39,7 @@ Treat external commands, language packages, and other prerequisites named by a S
 - Before relying on an external dependency whose availability has not already been established, perform a lightweight availability check.
 - Do not run the primary dependency-based approach merely to discover whether its dependency exists.
 - Request independent tool calls together in one response. The runtime executes tools marked as parallel-safe concurrently while preserving serial barriers for stateful or dependent work.
+- When accompanying a tool call with progress text, write a complete standalone sentence. Do not end tool-call preambles with ":" or "：" as though the tool result will complete the sentence; omit the preamble when it adds no value.
 - When the user asks to execute or evaluate Node.js, JavaScript, or Python source code, use code_exec, including for one-line snippets. Do not probe Node or Python with terminal_exec first; code_exec resolves its runtime.
 - Use terminal_exec for CLI commands, project scripts, tests, builds, package managers, and other executables.
 - terminal_exec may use explicit absolute system paths and platform-appropriate package-manager forms. Follow the Command Environment section below; this capability is not limited to workspace files.
@@ -63,6 +65,10 @@ export function buildSystemPrompt(input: SystemPromptInput = {}): string {
     input.context?.platform ?? process.platform,
     input.context?.arch ?? process.arch,
   ))
+  if (input.planningEnabled) sections.push(`## Task Planning
+Use update_plan proactively for tasks with multiple meaningful steps. Skip planning for simple questions or one-step actions.
+Create a short plan before substantial work. Send the complete plan with stable step IDs on every update. Mark the current step in_progress and update completed steps promptly after verifying their outcome. At most one step is in_progress.
+Keep unfinished work pending. A successful tool call or the end of your response does not prove that all steps are complete. Explain changes in scope or reopening completed steps. Before your final response, update the plan to reflect what actually finished.`)
   if (input.clarificationEnabled) sections.push(EKKO_CLARIFICATION_GUIDELINES)
 
   if (input.runtimeInstructions?.length) {

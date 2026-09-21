@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   AgentToolError,
   DEFAULT_READ_FILE_MAX_BYTES,
+  DEFAULT_TOOL_RESULT_MAX_TEXT_BYTES,
   DelegateTaskTool,
   ReadFileTool,
   TerminalExecTool,
@@ -48,6 +49,59 @@ describe('ekko-agent tools', () => {
     expect(fileURLToPath(url)).toContain(toolAssets)
     await expect(readFile(fileURLToPath(url), 'utf8')).resolves.toBe('avatar-png')
     expect(JSON.stringify(result.data)).not.toContain('base64')
+  })
+
+  it('applies a provider-safe fallback limit to every textual tool result', async () => {
+    const toolAssets = path.join(workspaceRoot, '.ekko-tmp', 'tool-assets')
+    const content = `start-${'z'.repeat(DEFAULT_TOOL_RESULT_MAX_TEXT_BYTES)}-finish`
+    const result = await sanitizeAgentToolResult({
+      ok: true,
+      content,
+    }, {
+      tempRoot: toolAssets,
+      maxTextBytes: 120,
+    })
+
+    expect(Buffer.byteLength(result.content)).toBeLessThan(1_000)
+    expect(result.content).toContain('tool result truncated')
+    expect(result.content).toContain('start-')
+    expect(result.content).toContain('-finish')
+    const artifactPath = result.content.match(/Full output saved to (.+?); inspect it/)?.[1]
+    expect(artifactPath).toBeTruthy()
+    await expect(readFile(artifactPath!, 'utf8')).resolves.toBe(content)
+    await expect(readFile(path.join(workspaceRoot, '.ekko-tmp', '.gitignore'), 'utf8')).resolves.toBe('*\n')
+  })
+
+  it('keeps a bounded text preview when the complete result cannot be persisted', async () => {
+    const blockedTempRoot = path.join(workspaceRoot, 'blocked-tool-assets')
+    const content = `start-${'z'.repeat(500)}-finish`
+    await writeFile(blockedTempRoot, 'not-a-directory')
+
+    const result = await sanitizeAgentToolResult({ ok: true, content }, {
+      tempRoot: blockedTempRoot,
+      maxTextBytes: 120,
+    })
+
+    expect(result.content).toContain('tool result truncated')
+    expect(result.content).toContain('Full output could not be saved')
+    expect(result.content).toContain('start-')
+    expect(result.content).toContain('-finish')
+  })
+
+  it('caps persisted fallback text artifacts', async () => {
+    const toolAssets = path.join(workspaceRoot, '.ekko-tmp', 'tool-assets')
+    const content = `start-${'z'.repeat(500)}-finish`
+    const result = await sanitizeAgentToolResult({ ok: true, content }, {
+      tempRoot: toolAssets,
+      maxTextBytes: 120,
+      maxTextArtifactBytes: 64,
+    })
+
+    expect(result.content).toContain('first 64 bytes were saved')
+    expect(result.content).toContain('artifact reached its safety limit')
+    const artifactPath = result.content.match(/saved to (.+?); the artifact/)?.[1]
+    expect(artifactPath).toBeTruthy()
+    await expect(readFile(artifactPath!, 'utf8')).resolves.toBe(content.slice(0, 64))
   })
 
   it('writes and reads files inside the workspace', async () => {
@@ -136,13 +190,38 @@ describe('ekko-agent tools', () => {
       .rejects.toMatchObject({ code: 'INVALID_TOOL_INPUT' })
   })
 
-  it('blocks file paths outside workspaceRoot', async () => {
+  it('reads files outside workspaceRoot while keeping writes isolated', async () => {
     const reader = new ReadFileTool()
+    const writer = new WriteFileTool()
+    const outsideRoot = await mkdtemp(path.join(os.tmpdir(), 'ekko-agent-tools-outside-'))
+    const outsideFile = path.join(outsideRoot, 'outside.txt')
+    await writeFile(outsideFile, 'outside workspace')
 
-    await expect(reader.execute({ path: '../outside.txt' }, { workspaceRoot })).rejects.toBeInstanceOf(AgentToolError)
-    await expect(reader.execute({ path: '../outside.txt' }, { workspaceRoot })).rejects.toMatchObject({
-      code: 'PATH_OUTSIDE_WORKSPACE',
-    })
+    try {
+      await expect(reader.execute({ path: outsideFile }, { workspaceRoot })).resolves.toMatchObject({
+        ok: true,
+        content: 'outside workspace',
+        data: { path: outsideFile },
+      })
+      await expect(reader.execute({
+        path: path.relative(workspaceRoot, outsideFile),
+      }, { workspaceRoot })).resolves.toMatchObject({
+        ok: true,
+        content: 'outside workspace',
+      })
+      await expect(writer.execute({
+        path: outsideFile,
+        content: 'must remain blocked',
+      }, { workspaceRoot })).rejects.toBeInstanceOf(AgentToolError)
+      await expect(writer.execute({
+        path: outsideFile,
+        content: 'must remain blocked',
+      }, { workspaceRoot })).rejects.toMatchObject({
+        code: 'PATH_OUTSIDE_WORKSPACE',
+      })
+    } finally {
+      await rm(outsideRoot, { recursive: true, force: true })
+    }
   })
 
   it('loads supported workspace images as multimodal tool results', async () => {
@@ -228,6 +307,78 @@ describe('ekko-agent tools', () => {
     })
   })
 
+  it('bounds terminal output and saves the complete streams for paged inspection', async () => {
+    const terminal = new TerminalExecTool({ maxOutputBytes: 90, maxStderrBytes: 30 })
+    const stdout = `head-${'x'.repeat(180)}-tail`
+    const stderr = `error-${'y'.repeat(60)}-end`
+    const result = await terminal.execute({
+      command: process.execPath,
+      args: ['-e', 'process.stdout.write(process.argv[1]); process.stderr.write(process.argv[2])', stdout, stderr],
+    }, { workspaceRoot, runId: 'large-output-test' })
+
+    expect(result.ok).toBe(true)
+    expect(Buffer.byteLength(result.content)).toBeLessThan(1_000)
+    expect(result.content).toContain('terminal_exec output truncated')
+    expect(result.content).toContain('inspect it with read_file using offsets or a bounded search')
+    expect(result.data).toMatchObject({
+      stdoutBytes: Buffer.byteLength(stdout),
+      stderrBytes: Buffer.byteLength(stderr),
+      stdoutTruncated: true,
+      stderrTruncated: true,
+    })
+    const data = result.data as {
+      stdoutArtifactPath: string
+      stderrArtifactPath: string
+    }
+    await expect(readFile(data.stdoutArtifactPath, 'utf8')).resolves.toBe(stdout)
+    await expect(readFile(data.stderrArtifactPath, 'utf8')).resolves.toBe(stderr)
+  })
+
+  it('caps persisted terminal artifacts while continuing to drain command output', async () => {
+    const terminal = new TerminalExecTool({ maxOutputBytes: 40, maxArtifactBytes: 64 })
+    const stdout = `head-${'x'.repeat(180)}-tail`
+    const result = await terminal.execute({
+      command: process.execPath,
+      args: ['-e', 'process.stdout.write(process.argv[1])', stdout],
+    }, { workspaceRoot, runId: 'artifact-cap-test' })
+
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        stdoutBytes: Buffer.byteLength(stdout),
+        stdoutTruncated: true,
+        stdoutArtifactBytes: 64,
+        stdoutArtifactTruncated: true,
+      },
+    })
+    expect(result.content).toContain('artifact reached its safety limit')
+    const artifactPath = (result.data as { stdoutArtifactPath: string }).stdoutArtifactPath
+    await expect(readFile(artifactPath, 'utf8')).resolves.toBe(stdout.slice(0, 64))
+  })
+
+  it('removes terminal artifacts when output stays within the context limit', async () => {
+    const terminal = new TerminalExecTool({ maxOutputBytes: 100, maxStderrBytes: 100 })
+    const result = await terminal.execute({
+      command: process.execPath,
+      args: ['-e', 'process.stdout.write("small")'],
+    }, { workspaceRoot, runId: 'small-output-test' })
+
+    expect(result).toMatchObject({
+      ok: true,
+      content: 'small',
+      data: {
+        stdout: 'small',
+        stdoutBytes: 5,
+        stdoutTruncated: false,
+        stderrBytes: 0,
+        stderrTruncated: false,
+      },
+    })
+    expect(result.data).not.toHaveProperty('stdoutArtifactPath')
+    expect(result.data).not.toHaveProperty('stderrArtifactPath')
+    await expect(readdir(path.join(workspaceRoot, '.ekko-tmp', 'tool-assets'))).resolves.toEqual([])
+  })
+
   it('defaults command temporary files to the current workspace', async () => {
     const terminal = new TerminalExecTool()
     const result = await terminal.execute({
@@ -239,6 +390,7 @@ describe('ekko-agent tools', () => {
     expect(result.ok).toBe(true)
     expect(JSON.parse(result.content)).toEqual({ TMPDIR: expected, TMP: expected, TEMP: expected })
     expect((await stat(expected)).isDirectory()).toBe(true)
+    await expect(readFile(path.join(expected, '.gitignore'), 'utf8')).resolves.toBe('*\n')
   })
 
   it('allows an explicit terminal working directory outside workspaceRoot', async () => {
@@ -330,6 +482,7 @@ describe('ekko-agent tools', () => {
       'skill_list',
       'skill_view',
       'terminal_exec',
+      'update_plan',
       'view_image',
       'write_file',
     ])

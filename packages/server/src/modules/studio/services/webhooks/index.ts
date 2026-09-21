@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto'
-import { getChatWebhookDispatcher } from './dispatcher'
-import { logger } from '../../public/logging'
-import { notifySessionPush } from '../../public/social-messages'
+import { businessEvents } from './business-events'
+import { ensureBusinessConsumers } from './business-consumers'
+import { acceptTaskPlanRevision, taskPlanWebhookSnapshot } from './task-plan'
 import {
   stableChatWebhookEventId,
   truncateChatWebhookContent,
@@ -23,6 +23,7 @@ export interface ObserveChatRunWebhookEventInput {
   roomId?: string
   workflowId?: string
   workflowNodeId?: string
+  pushTargetId?: string
 }
 
 function stringValue(value: unknown): string {
@@ -67,12 +68,6 @@ const EVENT_MAPPING: Record<string, { type: ChatWebhookEventType; status: ChatWe
   'run.failed': { type: 'chat.run.failed', status: 'failed' },
 }
 
-const SESSION_PUSH_EVENTS = new Set([
-  'run.completed',
-  'approval.requested',
-  'clarify.requested',
-])
-
 function messageRole(value: unknown): ChatWebhookMessageRole {
   return value === 'command' ? 'command' : value === 'assistant' ? 'assistant' : 'user'
 }
@@ -95,11 +90,16 @@ function occurredAt(value: unknown): string {
 
 export function observeChatRunWebhookEvent(input: ObserveChatRunWebhookEventInput): boolean {
   const payload = input.payload || {}
-  const mapping = input.event === 'tool.completed' && Boolean(payload.error)
+  const sessionId = stringValue(input.sessionId)
+  const plan = input.event === 'plan.updated' ? taskPlanWebhookSnapshot(payload, sessionId) : null
+  // Group cards publish only after their message snapshot has been persisted.
+  if (input.event === 'plan.updated' && (!plan || input.source === 'group_chat')) return false
+  const mapping: { type: ChatWebhookEventType; status: ChatWebhookLifecycleStatus } | undefined = plan
+    ? { type: input.source === 'workflow' ? 'workflow.plan.updated' : 'chat.plan.updated', status: 'updated' }
+    : input.event === 'tool.completed' && Boolean(payload.error)
     ? EVENT_MAPPING['tool.failed']
     : EVENT_MAPPING[input.event]
   if (!mapping) return false
-  const sessionId = stringValue(input.sessionId)
   if (!sessionId) return false
   const runId = identifierValue(payload.run_id) || identifierValue(payload.response_id)
   const queueId = identifierValue(payload.queue_id)
@@ -107,8 +107,10 @@ export function observeChatRunWebhookEvent(input: ObserveChatRunWebhookEventInpu
   const toolCallId = identifierValue(payload.tool_call_id) || identifierValue(payload.call_id)
   const approvalId = identifierValue(payload.approval_id)
   const clarificationId = identifierValue(payload.clarify_id)
-  const occurrenceKey = messageId || toolCallId || approvalId || clarificationId || runId || queueId || randomUUID()
-  const dedupeKey = `${mapping.type}:${sessionId}:${occurrenceKey}`
+  const occurrenceKey = plan ? `${plan.plan_id}:${plan.revision}` : approvalId || clarificationId || (input.event.startsWith('run.') ? runId || queueId || messageId : messageId || toolCallId || runId || queueId) || randomUUID()
+  // Coding-agent runtime IDs may persist across turns; mobile roots must not collapse.
+  const dedupeKey = plan ? `${mapping.type}:${input.profile || 'default'}:${sessionId}:${occurrenceKey}`
+    : `${mapping.type}:${sessionId}:${occurrenceKey}${input.pushTargetId ? `:${input.pushTargetId}` : ''}`
   const rawContent = input.event === 'run.completed'
     ? stringValue(payload.output)
     : input.event === 'message.created'
@@ -120,7 +122,7 @@ export function observeChatRunWebhookEvent(input: ObserveChatRunWebhookEventInpu
   const event: ChatRunWebhookEvent = {
     id: stableChatWebhookEventId(dedupeKey),
     type: mapping.type,
-    occurred_at: occurredAt(payload.timestamp),
+    occurred_at: plan ? new Date(plan.updated_at).toISOString() : occurredAt(payload.timestamp),
     profile: input.profile || 'default',
     source: normalizeSource(input.source),
     agent: input.agent,
@@ -135,6 +137,7 @@ export function observeChatRunWebhookEvent(input: ObserveChatRunWebhookEventInpu
       room_id: input.roomId || undefined,
       workflow_id: input.workflowId || undefined,
       workflow_node_id: input.workflowNodeId || undefined,
+      ...(plan ? { plan_id: plan.plan_id } : {}),
     },
     summary: {
       status: mapping.status,
@@ -158,13 +161,13 @@ export function observeChatRunWebhookEvent(input: ObserveChatRunWebhookEventInpu
     content: content.text,
     content_truncated: content.truncated,
     content_role: input.event === 'message.created' ? role : input.event === 'run.completed' ? 'assistant' : undefined,
+    ...(plan ? { task_plan: plan } : {}),
   }
-  if (SESSION_PUSH_EVENTS.has(input.event)) {
-    void notifySessionPush(sessionId, input.event, payload, input.agent).catch(error => {
-      logger.warn({ error, sessionId, event: input.event }, '[chat-webhooks] failed to dispatch session push')
-    })
-  }
-  return getChatWebhookDispatcher().enqueue(event)
+  if (plan && !acceptTaskPlanRevision(`${mapping.type}:${event.profile}`, plan)) return false
+  ensureBusinessConsumers()
+  return businessEvents.publish({ schema_version: 1, id: event.id, type: event.type, occurred_at: event.occurred_at,
+    profile: event.profile.trim() || 'default', source: event.source, subject: event.subject, payload, chat: event,
+    ...(input.pushTargetId ? { push_target_id: input.pushTargetId } : {}) })
 }
 
 export * from './dispatcher'

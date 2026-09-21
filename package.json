@@ -12,6 +12,11 @@
     "node": ">=23.0.0"
   },
   "keywords": [
+    "ekko-studio",
+    "ekko-agent",
+    "multi-agent",
+    "coding-agents",
+    "workflow-automation",
     "hermes",
     "hermes-agent",
     "hermes-web",
@@ -31,8 +36,10 @@
   ],
   "bin": {
     "hermes-web-ui": "./bin/hermes-web-ui.mjs",
-    "hermes-web-ui-mcp": "./bin/hermes-studio-mcp.mjs",
-    "hermes-studio-mcp": "./bin/hermes-studio-mcp.mjs"
+    "hermes-web-ui-mcp": "./bin/hermes-web-ui-mcp.mjs",
+    "hermes-studio-mcp": "./bin/hermes-studio-mcp.mjs",
+    "ekko-studio-mcp": "./bin/ekko-studio-mcp.mjs",
+    "ekko-studio-web": "./bin/hermes-web-ui.mjs"
   },
   "scripts": {
     "start": "vite --host --port 8648",
@@ -66,7 +73,9 @@
     "build:desktop:linux": "npm run build && npm run desktop:install && npm --prefix packages/desktop run dist -- --linux --publish never",
     "openapi:generate": "node scripts/generate-openapi.mjs",
     "claude": "claude --dangerously-skip-permissions",
-    "test:workflow-live": "vite-node scripts/workflow-live-acceptance.ts"
+    "test:workflow-live": "vite-node scripts/workflow-live-acceptance.ts",
+    "pack:npm": "node scripts/pack-npm-releases.mjs",
+    "publish:npm": "node scripts/publish-npm-releases.mjs"
   },
   "files": [
     "bin/",
@@ -85,6 +94,7 @@
     "@vue-flow/node-resizer": "^1.5.1",
     "adm-zip": "^0.6.0",
     "agent-browser": "^0.26.0",
+    "boring-avatars-vanilla": "^1.0.2",
     "eventsource": "^4.1.0",
     "js-tiktoken": "^1.0.21",
     "katex": "^0.17.0",
@@ -93,8 +103,10 @@
     "pixi.js": "^8.19.0",
     "sharp": "^0.35.3",
     "sherpa-onnx-node": "1.13.3",
+    "smol-toml": "^1.8.0",
     "socket.io": "^4.8.3",
-    "socket.io-client": "^4.8.3"
+    "socket.io-client": "^4.8.3",
+    "yaml": "^2.9.0"
   },
   "optionalDependencies": {
     "sherpa-onnx-darwin-arm64": "1.13.3",

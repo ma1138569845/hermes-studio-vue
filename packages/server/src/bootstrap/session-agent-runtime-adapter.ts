@@ -1,3 +1,4 @@
+import { getAvailableModelGroupsForProfile } from '../modules/hermes/controllers/models'
 import { codingAgentRunManager } from '../modules/coding-agents/services/runtime/run-manager'
 import { AgentBridgeClient } from '../modules/hermes/services/bridge/client'
 import { getAgentBridgeManager } from '../modules/hermes/services/bridge/manager'
@@ -15,6 +16,7 @@ import { getModelContextLength } from '../modules/hermes/services/models/context
 import { configureSessionAgentRuntime } from '../modules/studio/public/session-agent-runtime'
 
 configureSessionAgentRuntime({
+  getAvailableModelGroups: getAvailableModelGroupsForProfile,
   deleteHermesSessionForProfile: deleteSessionForProfile,
   getHermesCliSession: getSession,
   getHermesModelContextLength: getModelContextLength,
@@ -41,4 +43,7 @@ configureSessionAgentRuntime({
     )
   },
   stopCodingAgentSessionRun: (sessionId, options) => codingAgentRunManager.stop(sessionId, options),
+  invalidateCodingAgentSessionRuntime: (sessionId, agentId = 'grok') => codingAgentRunManager.invalidateMatching(
+    launch => launch.sessionId === sessionId && launch.agentId === agentId,
+  ),
 })

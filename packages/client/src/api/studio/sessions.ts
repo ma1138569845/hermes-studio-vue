@@ -14,6 +14,7 @@ export interface SessionSummary {
   provider?: string
   api_mode?: ProviderApiMode
   reasoning_effort?: string
+  agent_preset?: string
   title: string | null
   parent_session_id?: string | null
   fork_point_message_id?: string | null
@@ -24,6 +25,7 @@ export interface SessionSummary {
   started_at: number
   ended_at: number | null
   last_active?: number
+  is_pinned?: number | boolean
   is_archived?: number | boolean
   push_enabled?: number | boolean
   message_count: number
@@ -74,6 +76,7 @@ export interface SessionContext {
 export interface PaginatedSessionMessages {
   session: SessionSummary
   messages: HermesMessage[]
+  taskPlans?: import('@/utils/task-plan').TaskPlanSnapshot[]
   workspaceRunChanges: WorkspaceRunChangeSummary[]
   total: number
   offset: number
@@ -535,6 +538,13 @@ export async function unarchiveSession(id: string): Promise<boolean> {
   } catch {
     return false
   }
+}
+
+export function setSessionPinned(id: string, is_pinned: boolean): Promise<{ ok: boolean; is_pinned: boolean }> {
+  return request(`/api/studio/sessions/${encodeURIComponent(id)}/pin`, {
+    method: 'POST',
+    body: JSON.stringify({ is_pinned }),
+  })
 }
 
 export async function setSessionPushEnabled(id: string, pushEnabled: boolean): Promise<boolean> {

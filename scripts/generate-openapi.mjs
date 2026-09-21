@@ -75,6 +75,7 @@ const tagMappings = {
   'modules/ekko/routes/config.ts': { name: 'Ekko Config', description: 'Ekko runtime configuration management' },
   'modules/studio/routes/workflows.ts': { name: 'Workflows', description: 'Cross-agent workflow orchestration' },
   'modules/studio/routes/sessions.ts': { name: 'Sessions', description: 'Cross-agent chat session management' },
+  'modules/studio/routes/session-shares.ts': { name: 'Session Shares', description: 'App-bound single-session share tokens, first claim, permissions and revocation' },
   'modules/studio/routes/logs.ts': { name: 'Logs', description: 'Cross-agent log file access' },
   'modules/studio/routes/social-messages.ts': { name: 'Social Messages', description: 'Unified outbound messaging for configured social platforms' },
   'modules/studio/routes/group-chat.ts': { name: 'Group Chat', description: 'Cross-agent group chat management' },
@@ -96,6 +97,7 @@ const tagMappings = {
   'modules/studio/routes/mcu-devices.ts': { name: 'MCU Devices', description: 'Microcontroller device management' },
   'modules/studio/routes/mcu-firmware.ts': { name: 'MCU Firmware', description: 'Microcontroller firmware distribution' },
   'modules/studio/routes/theme.ts': { name: 'Theme', description: 'Per-user appearance settings and background image' },
+  'modules/studio/routes/announcements.ts': { name: 'Announcements', description: 'Published Studio desktop announcements, newest first' },
   'modules/studio/routes/api-docs.ts': { name: 'API Docs', description: 'OpenAPI route catalog' },
   'modules/studio/routes/agent-status.ts': { name: 'Agent Status', description: 'In-memory Agent installation, version, and source status' },
   'modules/coding-agents/routes/agents.ts': { name: 'Coding Agents', description: 'Coding agent installation, config, and runs' },
@@ -318,6 +320,39 @@ function addEndpoint(paths, method, path, controllerMethod, tagInfo, content, ma
   }
 
   const parameters = generateParameters(openapiPath, controllerSource)
+  if (openapiPath === '/api/studio/sessions' && method === 'get') {
+    operation.responses['200'] = {
+      description: 'Session list. Supplying offset also returns pagination metadata and the total matching the same visibility, category, and include/exclude filters before pagination.',
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object', required: ['sessions'],
+            properties: {
+              sessions: { type: 'array', items: { type: 'object', additionalProperties: true } },
+              total: { type: 'integer', minimum: 0, description: 'Total matching sessions, independent of offset and limit. Present when offset is supplied.' },
+              hasMore: { type: 'boolean' },
+              offset: { type: 'integer', minimum: 0 },
+              limit: { type: 'integer', minimum: 1 },
+            },
+          },
+        },
+      },
+    }
+    for (const parameter of parameters) {
+      if (parameter.name === 'category') {
+        parameter.schema = { oneOf: [{ type: 'integer', minimum: 1 }, { type: 'string', enum: ['none', 'pinned'] }] }
+        parameter.description = 'Filter by category ID; none selects uncategorized sessions, pinned selects database-pinned sessions.'
+      } else if (parameter.name === 'pinned') {
+        parameter.schema = { type: 'boolean' }
+        parameter.description = 'Filter by database pin state before pagination and counting. The pinned category takes precedence.'
+      } else if (parameter.name === 'include' || parameter.name === 'exclude') {
+        parameter.schema = { type: 'array', items: { type: 'string' } }
+        parameter.style = 'form'
+        parameter.explode = true
+        parameter.description = 'Repeat this parameter for each session ID.'
+      }
+    }
+  }
   if (parameters.length) operation.parameters = parameters
 
   const requestBody = generateRequestBody(method, controllerSource)
@@ -878,6 +913,70 @@ Object.keys(openapi.paths).sort().forEach(key => {
 openapi.paths = sortedPaths
 
 // Add special endpoints after sorting
+openapi.paths['/api/studio/sessions/{id}/pin'].post.requestBody = {
+  required: true,
+  content: { 'application/json': { schema: {
+    type: 'object', required: ['is_pinned'], properties: { is_pinned: { type: 'boolean' } },
+  } } },
+}
+
+// Shared task planning is bound to an authenticated, active turn capability.
+openapi.paths['/api/studio/task-plans/update'] = {
+  post: {
+    tags: ['Chat Run'], summary: 'Update the current turn task plan', operationId: 'updateTaskPlan',
+    description: 'Update the full ordered plan using the context_id injected into the current run instructions. Expired contexts and other profiles are rejected. Updates are persisted and emitted as plan.updated.',
+    security: [{ BearerAuth: [] }],
+    requestBody: { required: true, content: { 'application/json': { schema: {
+      type: 'object', required: ['context_id', 'plan'],
+      properties: {
+        context_id: { type: 'string' }, explanation: { type: 'string', maxLength: 1000 },
+        plan: { type: 'array', minItems: 1, maxItems: 30, items: {
+          type: 'object', required: ['id', 'step', 'status'], additionalProperties: false,
+          properties: {
+            id: { type: 'string', minLength: 1, maxLength: 100 },
+            step: { type: 'string', minLength: 1, maxLength: 200 },
+            status: { type: 'string', enum: ['pending', 'in_progress', 'completed'] },
+          },
+        } },
+      },
+    } } } },
+    responses: {
+      200: { description: 'Persisted task plan snapshot with session_id, run_id, plan_id, revision, execution_state, explanation, plan, created_at and updated_at (milliseconds).' },
+      400: { description: 'Invalid plan; at most one step can be in_progress and step ids must be unique.' },
+      409: { description: 'Context expired, belongs to another profile, or has no active turn.' },
+      503: { description: 'Chat run service unavailable.' },
+    },
+  },
+}
+
+// MCP user questions wait for a reply on the existing clarify.respond transport.
+openapi.paths['/api/studio/clarifications/request'] = {
+  post: {
+    tags: ['Chat Run'], summary: 'Ask a user clarification in the current coding-agent turn', operationId: 'requestClarification',
+    description: 'Requires the current interaction context_id and matching authenticated profile. Emits clarify.requested in Studio/App, waits up to five minutes, and returns the answer or an explicit timeout/dismissed/cancelled reason. Expired contexts cannot prompt a later turn. Caller-supplied session/run ids are ignored.',
+    security: [{ BearerAuth: [] }],
+    requestBody: { required: true, content: { 'application/json': { schema: {
+      type: 'object', required: ['context_id', 'question'],
+      properties: {
+        context_id: { type: 'string' },
+        question: { type: 'string', minLength: 1, maxLength: 4000 },
+        choices: { type: 'array', maxItems: 20, items: { type: 'string', minLength: 1, maxLength: 500 } },
+      },
+    } } } },
+    responses: {
+      200: { description: 'Clarification settled.', content: { 'application/json': { schema: {
+        type: 'object', required: ['ok', 'clarify_id', 'response', 'reason'], properties: {
+          ok: { type: 'boolean' }, clarify_id: { type: 'string' }, response: { type: 'string' },
+          reason: { type: 'string', enum: ['response', 'dismissed', 'timeout', 'cancelled'] },
+        },
+      } } } },
+      400: { description: 'Missing context or invalid question/choices.' },
+      409: { description: 'Expired or inactive context, wrong profile, or another question is pending.' },
+      503: { description: 'Chat run service unavailable.' },
+    },
+  },
+}
+
 // Add non-streaming Chat Run HTTP wrapper endpoint
 openapi.paths['/api/studio/chat-run/runs'] = {
   post: {
@@ -960,12 +1059,12 @@ openapi.paths['/api/studio/chat-run/runs'] = {
               },
               coding_agent_id: {
                 type: 'string',
-                enum: ['claude-code', 'codex'],
+                enum: ['claude-code', 'codex', 'pi', 'grok', 'opencode', 'ekko-agent'],
                 description: 'Coding agent id when source is coding_agent.',
               },
               agent_id: {
                 type: 'string',
-                enum: ['claude-code', 'codex'],
+                enum: ['claude-code', 'codex', 'pi', 'grok', 'opencode', 'ekko-agent'],
                 description: 'Alias for coding_agent_id.',
               },
               mode: {
@@ -1033,6 +1132,46 @@ openapi.paths['/api/studio/chat-run/runs'] = {
   },
 }
 
+openapi.paths['/api/studio/mobile-calendar/request'] = {
+  post: {
+    tags: ['Chat Run'],
+    summary: 'Request one-time mobile calendar or reminder access',
+    description: 'Requests a user-confirmed calendar/reminder operation from the App for the exact authenticated direct-chat session. Single-item delete requires exact id, title and occurrence time with fresh App confirmation. Background, workflow, group-chat, and delegated use are not supported.',
+    operationId: 'requestMobileCalendar',
+    security: [{ BearerAuth: [] }],
+    requestBody: {
+      required: true,
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            required: ['session_id', 'capability', 'action', 'purpose'],
+            properties: {
+              session_id: { type: 'string' },
+              capability: { type: 'string', enum: ['calendar', 'reminder'] },
+              action: { type: 'string', enum: ['list', 'create', 'update', 'complete', 'delete'] },
+              purpose: { type: 'string', maxLength: 240 },
+              start_ms: { type: 'number' },
+              end_ms: { type: 'number' },
+              include_completed: { type: 'boolean' },
+              limit: { type: 'integer', minimum: 1, maximum: 100 },
+              item: { type: 'object', additionalProperties: true },
+              timeout_ms: { type: 'integer', minimum: 3000, maximum: 300000, default: 300000 },
+            },
+          },
+        },
+      },
+    },
+    responses: {
+      '200': { description: 'Confirmed App result, denial, or sanitized device error' },
+      '400': { $ref: '#/components/responses/BadRequest' },
+      '401': { $ref: '#/components/responses/Unauthorized' },
+      '404': { $ref: '#/components/responses/NotFound' },
+      '503': { description: 'Chat run service unavailable' },
+    },
+  },
+}
+
 // Add WebSocket terminal endpoint
 openapi.paths['/api/hermes/terminal'] = {
   'get': {
@@ -1050,6 +1189,203 @@ openapi.paths['/api/hermes/terminal'] = {
 // Add Terminal tag
 if (!openapi.tags.find(t => t.name === 'Terminal')) {
   openapi.tags.push({ name: 'Terminal', description: 'WebSocket terminal access' })
+}
+
+// DSH Web profile plugins and native schema-based settings.
+const pluginResponse = schema => ({ description: 'Plugin state', content: { 'application/json': { schema } } })
+const pluginError = description => ({ description, content: { 'application/json': { schema: {
+  type: 'object', properties: { code: { type: 'string' }, error: { type: 'string' }, retryable: { type: 'boolean' } },
+} } } })
+const pluginAuth = { security: [{ BearerAuth: [] }], tags: ['Coding Agents'] }
+openapi.paths['/api/coding-agents/dsh/plugin-inventory'] = { get: {
+  ...pluginAuth, operationId: 'getNativeDshPluginInventory', summary: 'Discover native DSH preset plugin entries',
+  description: 'Super admin only. Reads the installed CLI dependency graph and native shipped/user preset compositions, recursively flattening groups. Includes disabled entries. Does not execute YAML expressions or connect to the Web runtime. Custom deployment roots and overlays are not resolved. Counts are per preset, not npm package counts. Includes separately counted packages installed in the native Web profile. Runtime phases remain unknown for this static inventory.',
+  responses: { '200': pluginResponse({ type: 'object', properties: {
+    source: { type: 'string', enum: ['native-presets'] }, discovery: { type: 'string', enum: ['shipped-and-user-roots'] },
+    sourceHome: { type: 'string' }, packageVersion: { type: 'string' }, defaultPreset: { type: 'string' }, runtimeConnected: { type: 'boolean', enum: [false] },
+    web: { type: 'object', properties: { profile: { type: 'string', enum: ['web'] }, sourcePath: { type: 'string' }, revision: { type: 'string' }, packages: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, title: { type: 'string' }, description: { type: 'string' }, requested: { type: 'string' }, version: { type: 'string' }, bundle: { type: 'boolean' }, containsBrowserPart: { type: 'boolean' }, sourcePath: { type: 'string' }, error: { type: 'string' } } } } } },
+    presets: { type: 'array', items: { type: 'object', properties: {
+      id: { type: 'string' }, name: { type: 'string' }, description: { type: 'string' }, trust: { type: 'string', enum: ['system', 'user'] },
+      sourcePath: { type: 'string' }, isDefault: { type: 'boolean' }, error: { type: 'string' },
+      entries: { type: 'array', items: { type: 'object', properties: {
+        entryId: { type: 'string' }, title: { type: 'string' }, description: { type: 'string' }, moduleName: { type: 'string' }, configuredEnabled: { oneOf: [{ type: 'boolean' }, { type: 'string', enum: ['conditional'] }] },
+        runtimePhase: { nullable: true, enum: [null] }, groupPath: { type: 'array', items: { type: 'string' } },
+      } } },
+    } } },
+  } }), '401': pluginError('Authentication required'), '403': pluginError('Super admin required'), '422': pluginError('Native inventory unavailable in this installation'), '500': pluginError('Source unavailable') },
+} }
+const packageResponses = { '200': pluginResponse({ type: 'object', additionalProperties: true }), '400': pluginError('Invalid package selection'), '403': pluginError('Super admin required'), '409': pluginError('Another package operation is running'), '412': pluginError('Web profile changed; reload before continuing'), '422': pluginError('Native package command failed'), '503': pluginError('DSH or package manager unavailable') }
+openapi.paths['/api/coding-agents/dsh/web-plugins'] = { post: {
+  ...pluginAuth, operationId: 'changeDshWebPlugins', summary: 'Install or remove packages in the native Web profile',
+  parameters: [{ in: 'header', name: 'If-Match', required: true, schema: { type: 'string' }, description: 'Quoted Web manifest revision from plugin-inventory' }],
+  requestBody: { required: true, content: { 'application/json': { schema: { oneOf: [
+    { type: 'object', required: ['action', 'packageSpec'], properties: { action: { type: 'string', enum: ['install'] }, packageSpec: { type: 'string', description: 'package@exact-version or github:owner/repo#commit' } } },
+    { type: 'object', required: ['action', 'packageName'], properties: { action: { type: 'string', enum: ['remove'] }, packageName: { type: 'string' } } },
+  ] } } } }, responses: packageResponses,
+} }
+openapi.paths['/api/coding-agents/dsh/ui-session'] = { post: {
+  ...pluginAuth, operationId: 'openDshPluginUi', summary: 'Open an authenticated native DSH configuration slot',
+  description: 'Super admin only. Starts the native Web runtime and returns a short-lived scoped frame path. Plugin forms and business APIs are owned by DSH and installed plugins.',
+  responses: { '200': pluginResponse({ type: 'object', properties: { id: { type: 'string' }, path: { type: 'string' } } }), '403': pluginError('Super admin required'), '503': pluginError('Native DSH Web runtime unavailable') },
+} }
+openapi.paths['/api/coding-agents/dsh/ui-session/{id}'] = { delete: {
+  ...pluginAuth, operationId: 'closeDshPluginUi', summary: 'Revoke a native plugin frame session',
+  parameters: [{ in: 'path', name: 'id', required: true, schema: { type: 'string' } }], responses: { '204': { description: 'Frame session revoked' }, '403': pluginError('Super admin required') },
+} }
+
+// Studio-owned Agent preset presentation over the existing native DSH host.
+const presetRowSchema = { type: 'object', required: ['id', 'trust', 'isDefault'], properties: {
+  id: { type: 'string' }, name: { type: 'string' }, description: { type: 'string' }, trust: { type: 'string', enum: ['system', 'user'] }, isDefault: { type: 'boolean' }, broken: { type: 'string' },
+} }
+const presetRosterSchema = { type: 'object', required: ['presets', 'authorable'], properties: { presets: { type: 'array', items: presetRowSchema }, authorable: { type: 'boolean' } } }
+const presetErrors = { '400': pluginError('Invalid preset request'), '403': pluginError('Super admin required or shipped preset is read-only'), '404': pluginError('Preset not found'), '422': pluginError('Unavailable preset or invalid operation'), '502': pluginError('Native preset service unavailable'), '503': pluginError('DSH installation unavailable') }
+const presetParameters = [{ in: 'path', name: 'presetId', required: true, schema: { type: 'string', pattern: '^[a-z0-9][a-z0-9-]*$', maxLength: 200 } }]
+openapi.paths['/api/coding-agents/dsh/session-presets'] = { get: {
+  ...pluginAuth, operationId: 'listDshSessionPresets', summary: 'List DSH modes available when creating a chat',
+  description: 'Available to authenticated chat users. Returns only preset identifiers, names, descriptions, default and availability; does not expose configuration files or authoring operations.',
+  responses: { '200': pluginResponse({ type: 'object', required: ['presets'], properties: { presets: { type: 'array', items: { type: 'object', required: ['id', 'isDefault'], properties: { id: { type: 'string' }, name: { type: 'string' }, description: { type: 'string' }, isDefault: { type: 'boolean' }, unavailable: { type: 'boolean' } } } } } }), '502': pluginError('Native preset service unavailable'), '503': pluginError('DSH installation unavailable') },
+} }
+openapi.paths['/api/coding-agents/dsh/agent-presets'] = {
+  get: { ...pluginAuth, operationId: 'listDshAgentPresets', summary: 'List the live native Agent preset roster', description: 'Reuses the existing owned DSH management host, including configured preset roots. Returns names, descriptions, default, authoring availability and broken states.', responses: { '200': pluginResponse(presetRosterSchema), ...presetErrors } },
+  post: { ...pluginAuth, operationId: 'copyDshAgentPreset', summary: 'Duplicate a native Agent preset into its writable source root', requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['from', 'id'], properties: { from: { type: 'string' }, id: { type: 'string', pattern: '^[a-z0-9][a-z0-9-]*$', maxLength: 200 }, name: { type: 'string', maxLength: 200 } } } } } }, responses: { '200': pluginResponse(presetRosterSchema), ...presetErrors } },
+}
+openapi.paths['/api/coding-agents/dsh/agent-presets/{presetId}'] = {
+  get: { ...pluginAuth, operationId: 'readDshAgentPreset', summary: 'Read a native preset composition', parameters: presetParameters, responses: { '200': pluginResponse({ type: 'object', properties: { agentPreset: { type: 'string' }, content: { type: 'string' }, name: { type: 'string' }, trust: { type: 'string', enum: ['system', 'user'] } } }), ...presetErrors } },
+  delete: { ...pluginAuth, operationId: 'deleteDshAgentPreset', summary: 'Delete a custom preset directory through DSH', description: 'Native DSH rejects shipped presets and clears a deleted user default. Existing sessions retain their mounted composition.', parameters: presetParameters, responses: { '200': pluginResponse(presetRosterSchema), ...presetErrors } },
+}
+openapi.paths['/api/coding-agents/dsh/agent-presets/{presetId}/default'] = { put: { ...pluginAuth, operationId: 'defaultDshAgentPreset', summary: 'Set the native preset default for new sessions', parameters: presetParameters, responses: { '200': pluginResponse(presetRosterSchema), ...presetErrors } } }
+openapi.paths['/api/coding-agents/dsh/agent-presets/{presetId}/location'] = { post: { ...pluginAuth, operationId: 'locateDshAgentPreset', summary: 'Open a custom preset directory on the DSH host or return its path', parameters: presetParameters, responses: { '200': pluginResponse({ oneOf: [{ type: 'object', required: ['opened'], properties: { opened: { type: 'boolean', enum: [true] } } }, { type: 'object', required: ['opened', 'path'], properties: { opened: { type: 'boolean', enum: [false] }, path: { type: 'string' } } }] }), ...presetErrors } } }
+
+// Share identities use separate headers so App relays cannot replace the cloud
+// account credential with a local Studio JWT.
+openapi.components.securitySchemes.AppAccessToken = { type: 'apiKey', in: 'header', name: 'X-App-Access-Token', description: 'Cloud App access token, verified against /api/app/auth/me.' }
+openapi.components.securitySchemes.SessionShareToken = { type: 'apiKey', in: 'header', name: 'X-Session-Share-Token', description: 'sst1_ invitation secret; never accepted as a Studio login JWT.' }
+// These existing routes accept a second, session-scoped authentication mechanism.
+const shareReadPaths = ['/api/studio/sessions/{id}', '/api/studio/sessions/{id}/context', '/api/studio/sessions/{id}/usage',
+  '/api/studio/sessions/conversations/{id}/messages', '/api/studio/sessions/conversations/{id}/messages/paginated']
+for (const [path, methods] of Object.entries(openapi.paths)) {
+  for (const [method, operation] of Object.entries(methods)) {
+    let permission = ''
+    if (method === 'get' && shareReadPaths.includes(path)) permission = 'read'
+    if (method === 'post' && path === '/api/studio/chat-run/runs') permission = 'input'
+    if (method === 'get' && ['/api/studio/files/download', '/api/studio/sessions/{id}/export'].includes(path)) permission = 'download'
+    if (method === 'get' && /^\/api\/studio\/sessions\/\{id\}\/(workspace-files\/list|workspace-file\/(read|diff|content)|workspace-run-changes(?:\/\{changeId\}\/files\/\{fileId\})?)$/.test(path)) permission = 'workspaceRead'
+    if (['put workspace-file/write', 'post workspace-file/mkdir', 'delete workspace-file/delete', 'post workspace-file/rename', 'post workspace-file/copy'].includes(`${method} ${path.replace('/api/studio/sessions/{id}/', '')}`)) permission = 'workspaceWrite'
+    if ((method === 'post' && path === '/api/studio/uploads') || /^\/api\/studio\/app-uploads(?:\/\{id\}(?:\/chunks|\/complete)?)?$/.test(path)) permission = 'upload'
+    if (method === 'get' && path === '/api/studio/sessions/{id}/share-models') permission = 'switchModel'
+    if (method === 'get' && path === '/api/studio/sessions/{id}/share-workspaces') permission = 'switchWorkspace'
+    if (method === 'post' && path === '/api/studio/sessions/{id}/model') permission = 'switchModel'
+    if (method === 'post' && path === '/api/studio/sessions/{id}/reasoning-effort') permission = 'reasoningEffort'
+    if (method === 'post' && path === '/api/studio/sessions/{id}/workspace') permission = 'switchWorkspace'
+    if (!permission) continue
+    operation.security = [...(operation.security || [{ BearerAuth: [] }]), { AppAccessToken: [], SessionShareToken: [] }]
+    operation['x-session-share-permission'] = permission
+    operation.description = `${operation.description || ''}\nApp session sharing: requires the claimed recipient identity and ${permission} permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.`.trim()
+  }
+}
+const sharePermissionSchema = { type: 'object', additionalProperties: false, properties: Object.fromEntries(
+  ['input', 'voice', 'upload', 'download', 'workspaceRead', 'workspaceWrite', 'outsideWorkspace', 'terminal', 'switchModel', 'reasoningEffort', 'switchWorkspace'].map(key => [key, { type: 'boolean', default: false }]),
+) }
+sharePermissionSchema.properties.voice.description = 'Use session-scoped speech transcription and synthesis with the sharer Profile voice settings. Sending transcribed messages still requires input. Defaults to false for existing shares.'
+sharePermissionSchema.properties.switchModel.description = 'Change the shared session model using the scoped share-models catalog, and edit the current Hermes/Ekko model context limit. Does not grant reasoning-effort changes.'
+sharePermissionSchema.properties.reasoningEffort.description = 'Change the shared session reasoning effort independently of model selection.'
+sharePermissionSchema.properties.switchWorkspace.description = 'Select an existing directory within the original workspace, or an explicit extraPaths grant when outsideWorkspace is enabled. Does not grant filesystem read/write or expand the share scope.'
+for (const [suffix, description] of [
+  ['share-models', 'Selectable models for this session. Returns provider/model labels and IDs without provider secrets or endpoints.'],
+  ['share-workspaces', 'Browse only directories that this share may select as workspace. Empty path returns authorized roots; an absolute path returns child directories.'],
+]) {
+  const operation = openapi.paths[`/api/studio/sessions/{id}/${suffix}`]?.get
+  if (!operation) continue
+  operation.security = [{ AppAccessToken: [], SessionShareToken: [] }]
+  operation.description = `${description} ${operation.description || ''}`
+  if (suffix === 'share-workspaces') operation.parameters = [
+    ...(operation.parameters || []).filter(parameter => parameter.name !== 'path'),
+    { name: 'path', in: 'query', required: false, schema: { type: 'string' }, description: 'Existing absolute directory in the share scope. Omit to list authorized roots.' },
+  ]
+}
+const shareChangeSchema = { type: 'object', additionalProperties: false, properties: {
+  permissions: sharePermissionSchema,
+  extraPaths: { type: 'array', maxItems: 16, items: { type: 'object', additionalProperties: false, required: ['path', 'writable'], properties: {
+    path: { type: 'string', description: 'Existing absolute directory explicitly allowed outside the session workspace. Super administrator only.' }, writable: { type: 'boolean' },
+  } } },
+} }
+const shareBody = schema => ({ required: true, content: { 'application/json': { schema } } })
+for (const kind of ['synthesize', 'transcribe']) {
+  const operation = openapi.paths[`/api/studio/sessions/{id}/share-voice/${kind}`].post
+  operation.operationId = kind === 'synthesize' ? 'synthesizeSessionShareSpeech' : 'transcribeSessionShareSpeech'
+  operation.security = [{ AppAccessToken: [], SessionShareToken: [] }]
+  operation['x-session-share-permission'] = 'voice'
+  operation.description = 'Requires voice permission on the claimed shared session. Uses the share-bound Profile active speech provider and stored settings; provider, credential and option overrides are rejected. No upload permission is required. Sending recognized text additionally requires input.'
+  operation.requestBody = kind === 'synthesize'
+    ? shareBody({ type: 'object', additionalProperties: false, required: ['text'], properties: { text: { type: 'string', minLength: 1, maxLength: 5000 } } })
+    : { required: true, content: { 'multipart/form-data': { schema: { type: 'object', additionalProperties: false, required: ['audio'], properties: { audio: { type: 'string', format: 'binary' } } } } } }
+  operation.responses['200'] = kind === 'synthesize'
+    ? { description: 'MP3 speech audio', content: { 'audio/mpeg': { schema: { type: 'string', format: 'binary' } } } }
+    : { description: 'Recognized speech; text is empty when no speech is detected', content: { 'application/json': { schema: { type: 'object', properties: { text: { type: 'string' }, provider: { type: 'string' }, model: { type: 'string' }, durationMs: { type: 'number' } } } } } }
+  operation.responses['400'] = { description: 'Invalid text/audio, unsupported provider or missing host configuration' }
+  operation.responses['403'] = { description: 'Voice permission denied or session/profile mismatch' }
+  operation.responses['410'] = { description: 'Share expired or revoked' }
+}
+const shareContextPath = openapi.paths['/api/studio/sessions/{id}/share-context-length']
+for (const method of ['get', 'put']) {
+  const operation = shareContextPath[method]
+  operation.operationId = method === 'get' ? 'getSessionShareContextLength' : 'setSessionShareContextLength'
+  operation.security = [{ AppAccessToken: [], SessionShareToken: [] }]
+  operation['x-session-share-permission'] = method === 'get' ? 'read' : 'switchModel'
+  operation.description = 'Read or edit the current shared Hermes/Ekko model context limit. Profile and session are server-bound. Writes require switchModel and matching current provider/model; the value is model-level within the shared Profile. Coding Agents do not support this operation.'
+  operation.responses['200'] = { description: 'Current context limit', content: { 'application/json': { schema: {
+    type: 'object', required: ['context_length'], properties: { context_length: { type: 'integer', minimum: 1 } },
+  } } } }
+  operation.responses['403'] = { description: 'Permission denied or session/profile mismatch' }
+  operation.responses['410'] = { description: 'Share expired or revoked' }
+}
+shareContextPath.put.requestBody = shareBody({ type: 'object', additionalProperties: false,
+  required: ['provider', 'model', 'context_limit'], properties: {
+    provider: { type: 'string', minLength: 1 }, model: { type: 'string', minLength: 1 },
+    context_limit: { type: 'integer', minimum: 1000, maximum: 10000000 },
+  },
+})
+openapi.components.schemas.SessionShare = {
+  type: 'object', additionalProperties: false,
+  properties: {
+    id: { type: 'string' }, session_id: { type: 'string' },
+    sharer_app_user_id: { type: 'integer' }, sharer_name_snapshot: { type: 'string' },
+    recipient_app_user_id: { type: 'integer', nullable: true }, recipient_name_snapshot: { type: 'string', nullable: true },
+    permissions: sharePermissionSchema, policy_version: { type: 'integer' },
+    ...Object.fromEntries(['created_at', 'updated_at', 'expires_at', 'claimed_at', 'revoked_at'].map(key => [key, {
+      type: 'integer', format: 'int64', description: 'Unix epoch milliseconds', ...(['claimed_at', 'revoked_at'].includes(key) ? { nullable: true } : {}),
+    }])),
+  },
+}
+for (const [path, methods] of Object.entries(openapi.paths)) {
+  const management = /^\/api\/studio\/sessions\/\{sessionId\}\/shares/.test(path)
+  if (!management && !path.startsWith('/api/studio/session-shares/')) continue
+  for (const [method, operation] of Object.entries(methods)) {
+    operation.operationId = management
+      ? ({ post: 'createSessionShare', get: 'listSessionShares', patch: 'updateSessionShare', delete: 'revokeSessionShare' })[method]
+      : ({ claim: 'claimSessionShare', access: 'getSessionShareAccess', check: 'checkSessionSharePermission' })[path.split('/').pop()]
+    operation.parameters = [...path.matchAll(/\{([^}]+)\}/g)].map(match => ({ name: match[1], in: 'path', required: true, schema: { type: 'string' } }))
+    operation.security = management ? [{ BearerAuth: [] }] : [{ AppAccessToken: [], SessionShareToken: [] }]
+    if (management && ['post', 'patch'].includes(method)) operation.requestBody = shareBody(method === 'post'
+      ? { ...shareChangeSchema, required: ['sharer'], properties: { ...shareChangeSchema.properties,
+        sharer: { type: 'object', additionalProperties: false, required: ['id', 'name'], description: 'App-provided attribution only. Management authority comes from the authenticated local Studio owner, not this metadata.',
+          properties: { id: { type: 'integer', minimum: 1 }, name: { type: 'string', maxLength: 200 } } },
+      } } : shareChangeSchema)
+    if (path.endsWith('/claim')) operation.requestBody = shareBody({ type: 'object', additionalProperties: false, required: ['confirm'], properties: { confirm: { type: 'boolean', enum: [true] } } })
+    if (path.endsWith('/check')) operation.requestBody = shareBody({ type: 'object', additionalProperties: false, required: ['action', 'sessionId'], properties: {
+      action: { type: 'string', enum: ['read', ...Object.keys(sharePermissionSchema.properties)] }, sessionId: { type: 'string' },
+    } })
+    operation.responses = { ...operation.responses, '401': { description: 'Missing or invalid App identity / Studio App device credential' },
+      '403': { description: 'Recipient, session, resource, owner or permission mismatch' }, '404': { description: 'Share not found' },
+      '409': { description: 'Already claimed by another App user, or concurrent policy change' }, '410': { description: 'Share expired or revoked' },
+      '503': { description: 'Identity verification or transactional storage unavailable' } }
+    if (management && method === 'post') {
+      delete operation.responses['200']
+      operation.responses['201'] = { description: 'New independent invitation; secret is returned only at creation', content: { 'application/json': { schema: {
+        type: 'object', required: ['share', 'token'], properties: { share: { $ref: '#/components/schemas/SessionShare' }, token: { type: 'string', pattern: '^sst1_[A-Za-z0-9_-]{43}$' } },
+      } } } }
+    }
+  }
 }
 
 // Write output

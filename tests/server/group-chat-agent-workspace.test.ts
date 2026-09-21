@@ -50,7 +50,7 @@ const trackerMock = vi.hoisted(() => ({
 vi.mock('socket.io-client', () => ({ io: vi.fn(() => mockSocket) }))
 vi.mock('../../packages/server/src/modules/studio/services/auth/token-auth', () => ({ getToken: vi.fn(async () => 'test-token') }))
 vi.mock('../../packages/server/src/modules/studio/public/profile-config', () => ({
-  readConfigYamlForProfile: vi.fn(async () => ({ model: { default: 'model-a', provider: 'provider-a' } })),
+  readConfigYamlForProfile: vi.fn(async () => ({ model: { default: 'model-a', provider: 'provider-a' }, mcp_servers: { 'ekko-studio-interaction': { command: 'studio' } } })),
 }))
 vi.mock('../../packages/server/src/modules/studio/repositories/usage-store', () => ({ updateUsage: vi.fn() }))
 vi.mock('../../packages/server/src/modules/studio/public/group-chat-agent-runtime', () => ({
@@ -188,6 +188,7 @@ describe('group chat agent workspace bridge runs', () => {
   it.each([
     ['codex', 'codex'],
     ['claude', 'claude-code'],
+    ['dsh', 'dsh'],
     ['ekko', 'ekko-agent'],
   ] as const)('keeps %s tool output mention text non-routable', async (agent, codingAgentId) => {
     const { AgentClients } = await import('../../packages/server/src/modules/studio/services/group-chat/agent-clients')
@@ -209,6 +210,7 @@ describe('group chat agent workspace bridge runs', () => {
     const client = await clients.createAgent({
       agentId: `agent-${agent}`,
       agent,
+      agentPreset: agent === 'dsh' ? 'minimal' : undefined,
       profile: 'default',
       name: agent,
       description: '',
@@ -231,7 +233,7 @@ describe('group chat agent workspace bridge runs', () => {
     })
 
     expect(runAndWait).toHaveBeenCalledWith(
-      expect.objectContaining({ coding_agent_id: codingAgentId }),
+      expect.objectContaining({ coding_agent_id: codingAgentId, ...(agent === 'dsh' ? { agent_preset: 'minimal' } : {}) }),
       expect.anything(),
     )
     expect(mockSocket.emit).toHaveBeenCalledWith(
@@ -488,6 +490,11 @@ describe('group chat agent workspace bridge runs', () => {
   it('dispatches a Codex group agent through chat-run without invoking the Hermes bridge', async () => {
     const { AgentClients } = await import('../../packages/server/src/modules/studio/services/group-chat/agent-clients')
     const runAndWait = vi.fn(async (_data: any, options: any) => {
+      for (const revision of [1, 2]) options.onEvent?.('plan.updated', {
+        session_id: _data.session_id, run_id: 'runtime-run', plan_id: 'group-plan', revision,
+        execution_state: revision === 1 ? 'running' : 'ended', created_at: 1000, updated_at: 1000 + revision,
+        plan: [{ id: 'check', step: 'Check group plan', status: revision === 1 ? 'in_progress' : 'completed' }],
+      })
       options.onEvent?.('reasoning.delta', { delta: 'thinking' })
       options.onEvent?.('tool.started', {
         tool_call_id: 'tool-1',
@@ -587,6 +594,10 @@ describe('group chat agent workspace bridge runs', () => {
       }],
     })
 
+    const cards = mockSocket.emit.mock.calls.filter(call => call[0] === 'message' && call[1]?.tool_name === 'task_plan').map(call => call[1])
+    expect(cards).toHaveLength(2)
+    expect(cards[0].id).toBe(cards[1].id)
+    expect(JSON.parse(cards[1].content)).toMatchObject({ revision: 2, execution_state: 'ended', run_id: cards[1].run_id })
     expect(runAndWait).toHaveBeenCalledWith(expect.objectContaining({
       coding_agent_id: 'codex',
       source: 'group_chat',
@@ -732,6 +743,7 @@ describe('group chat agent workspace bridge runs', () => {
   it.each([
     ['ekko', 'ekko-agent'],
     ['claude', 'claude-code'],
+    ['dsh', 'dsh'],
     ['pi', 'pi'],
   ] as const)('passes the dynamic group system prompt to the %s runtime', async (agent, codingAgentId) => {
     const { AgentClients } = await import('../../packages/server/src/modules/studio/services/group-chat/agent-clients')
@@ -1463,6 +1475,52 @@ describe('group chat agent workspace bridge runs', () => {
     expect(mockSocket.emit).toHaveBeenCalledWith('clarify.resolved', expect.objectContaining({
       roomId: 'room-1', agentName: 'Worker', clarify_id: 'clarify-hermes', resolved: true,
     }))
+  })
+
+  it.each(['ended', 'interrupted', 'failed'] as const)('gives Hermes a plan-only context and persists its %s state', async terminal => {
+    const { TaskPlanRuns } = await import('../../packages/server/src/modules/studio/services/task-plan-runs')
+    const fallbackPublish = vi.fn()
+    const plans = new TaskPlanRuns(vi.fn(), fallbackPublish)
+    const client = await createClient('')
+    let contextId = ''
+    client.setChatRunService({
+      runAndWait: vi.fn(), abortSession: vi.fn(),
+      beginGroupTaskPlanRun(sessionId: string, profile: string, runId: string, isCurrent: () => boolean, publish: any) {
+        contextId = plans.begin(sessionId, profile, () => ({ isWorking: isCurrent(), activeRunMarker: runId }), publish)
+        return { contextId, finish: (state: any) => plans.finish(contextId, state) }
+      },
+    })
+    bridgeMock.chat.mockImplementation(async (sessionId: string) => {
+      plans.update(contextId, 'default', { plan: [{ id: 'a', step: 'Inspect', status: 'in_progress' }] })
+      if (terminal === 'failed') throw new Error('test bridge failure')
+      if (terminal === 'interrupted') await client.interrupt('room-1')
+      return { ok: true, run_id: 'bridge-run-id', session_id: sessionId, status: 'running' }
+    })
+    await client.replyToMention('room-1', { content: '@Worker inspect', senderName: 'Alice', senderId: 'user-1', timestamp: 1 })
+    const input = String((bridgeMock.chat.mock.calls[0] as any)[1])
+    expect(input).toContain(contextId)
+    expect(input).toContain('ekko_studio_update_plan')
+    expect(input).not.toContain('ekko_studio_clarify')
+    const cards = mockSocket.emit.mock.calls.filter(call => call[0] === 'message' && call[1]?.tool_name === 'task_plan').map(call => call[1])
+    expect(cards).toHaveLength(2)
+    expect(cards[0].id).toBe(cards[1].id)
+    expect(JSON.parse(cards[1].content)).toMatchObject({ revision: 2, execution_state: terminal, plan: [{ status: 'pending' }] })
+    expect(fallbackPublish).not.toHaveBeenCalled()
+    expect(() => plans.update(contextId, 'default', { plan: [] })).toThrow('expired')
+  })
+
+  it('does not attach MCP plans or usage guidance to a group bridge run with MCPs disabled', async () => {
+    const { readConfigYamlForProfile } = await import('../../packages/server/src/modules/studio/public/profile-config')
+    vi.mocked(readConfigYamlForProfile).mockResolvedValueOnce({ mcp_servers: {} })
+    const client = await createClient('')
+    const beginGroupTaskPlanRun = vi.fn()
+    client.setChatRunService({ runAndWait: vi.fn(), abortSession: vi.fn(), beginGroupTaskPlanRun })
+    await client.replyToMention('room-1', { content: '@Worker inspect', senderName: 'Alice', senderId: 'user-1', timestamp: 1 })
+    expect(beginGroupTaskPlanRun).not.toHaveBeenCalled()
+    const call = bridgeMock.chat.mock.calls[0] as any
+    expect(String(call[1])).not.toContain('studio_task_plan_context')
+    expect(call[3]).not.toContain('ekko_studio_')
+    expect(call[3]).toContain('# Output format guidelines')
   })
 
   it('omits workspace when the room has no workspace', async () => {

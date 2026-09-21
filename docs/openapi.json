@@ -129,6 +129,10 @@
       "description": "Cross-agent chat session management"
     },
     {
+      "name": "Session Shares",
+      "description": "App-bound single-session share tokens, first claim, permissions and revocation"
+    },
+    {
       "name": "Logs",
       "description": "Cross-agent log file access"
     },
@@ -207,6 +211,10 @@
     {
       "name": "Theme",
       "description": "Per-user appearance settings and background image"
+    },
+    {
+      "name": "Announcements",
+      "description": "Published Studio desktop announcements, newest first"
     },
     {
       "name": "API Docs",
@@ -1269,6 +1277,1929 @@
         }
       }
     },
+    "/api/coding-agents/dsh/agent-presets": {
+      "get": {
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "tags": [
+          "Coding Agents"
+        ],
+        "operationId": "listDshAgentPresets",
+        "summary": "List the live native Agent preset roster",
+        "description": "Reuses the existing owned DSH management host, including configured preset roots. Returns names, descriptions, default, authoring availability and broken states.",
+        "responses": {
+          "200": {
+            "description": "Plugin state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "presets",
+                    "authorable"
+                  ],
+                  "properties": {
+                    "presets": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "trust",
+                          "isDefault"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "type": "string"
+                          },
+                          "trust": {
+                            "type": "string",
+                            "enum": [
+                              "system",
+                              "user"
+                            ]
+                          },
+                          "isDefault": {
+                            "type": "boolean"
+                          },
+                          "broken": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "authorable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid preset request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Super admin required or shipped preset is read-only",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Preset not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unavailable preset or invalid operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Native preset service unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "DSH installation unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "tags": [
+          "Coding Agents"
+        ],
+        "operationId": "copyDshAgentPreset",
+        "summary": "Duplicate a native Agent preset into its writable source root",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "from",
+                  "id"
+                ],
+                "properties": {
+                  "from": {
+                    "type": "string"
+                  },
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9-]*$",
+                    "maxLength": 200
+                  },
+                  "name": {
+                    "type": "string",
+                    "maxLength": 200
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Plugin state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "presets",
+                    "authorable"
+                  ],
+                  "properties": {
+                    "presets": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "trust",
+                          "isDefault"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "type": "string"
+                          },
+                          "trust": {
+                            "type": "string",
+                            "enum": [
+                              "system",
+                              "user"
+                            ]
+                          },
+                          "isDefault": {
+                            "type": "boolean"
+                          },
+                          "broken": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "authorable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid preset request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Super admin required or shipped preset is read-only",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Preset not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unavailable preset or invalid operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Native preset service unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "DSH installation unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/coding-agents/dsh/agent-presets/{presetId}": {
+      "get": {
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "tags": [
+          "Coding Agents"
+        ],
+        "operationId": "readDshAgentPreset",
+        "summary": "Read a native preset composition",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "presetId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]*$",
+              "maxLength": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Plugin state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "agentPreset": {
+                      "type": "string"
+                    },
+                    "content": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "trust": {
+                      "type": "string",
+                      "enum": [
+                        "system",
+                        "user"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid preset request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Super admin required or shipped preset is read-only",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Preset not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unavailable preset or invalid operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Native preset service unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "DSH installation unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "tags": [
+          "Coding Agents"
+        ],
+        "operationId": "deleteDshAgentPreset",
+        "summary": "Delete a custom preset directory through DSH",
+        "description": "Native DSH rejects shipped presets and clears a deleted user default. Existing sessions retain their mounted composition.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "presetId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]*$",
+              "maxLength": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Plugin state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "presets",
+                    "authorable"
+                  ],
+                  "properties": {
+                    "presets": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "trust",
+                          "isDefault"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "type": "string"
+                          },
+                          "trust": {
+                            "type": "string",
+                            "enum": [
+                              "system",
+                              "user"
+                            ]
+                          },
+                          "isDefault": {
+                            "type": "boolean"
+                          },
+                          "broken": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "authorable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid preset request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Super admin required or shipped preset is read-only",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Preset not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unavailable preset or invalid operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Native preset service unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "DSH installation unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/coding-agents/dsh/agent-presets/{presetId}/default": {
+      "put": {
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "tags": [
+          "Coding Agents"
+        ],
+        "operationId": "defaultDshAgentPreset",
+        "summary": "Set the native preset default for new sessions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "presetId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]*$",
+              "maxLength": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Plugin state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "presets",
+                    "authorable"
+                  ],
+                  "properties": {
+                    "presets": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "trust",
+                          "isDefault"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "type": "string"
+                          },
+                          "trust": {
+                            "type": "string",
+                            "enum": [
+                              "system",
+                              "user"
+                            ]
+                          },
+                          "isDefault": {
+                            "type": "boolean"
+                          },
+                          "broken": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "authorable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid preset request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Super admin required or shipped preset is read-only",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Preset not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unavailable preset or invalid operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Native preset service unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "DSH installation unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/coding-agents/dsh/agent-presets/{presetId}/location": {
+      "post": {
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "tags": [
+          "Coding Agents"
+        ],
+        "operationId": "locateDshAgentPreset",
+        "summary": "Open a custom preset directory on the DSH host or return its path",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "presetId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]*$",
+              "maxLength": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Plugin state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "required": [
+                        "opened"
+                      ],
+                      "properties": {
+                        "opened": {
+                          "type": "boolean",
+                          "enum": [
+                            true
+                          ]
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "opened",
+                        "path"
+                      ],
+                      "properties": {
+                        "opened": {
+                          "type": "boolean",
+                          "enum": [
+                            false
+                          ]
+                        },
+                        "path": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid preset request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Super admin required or shipped preset is read-only",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Preset not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unavailable preset or invalid operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Native preset service unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "DSH installation unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/coding-agents/dsh/plugin-inventory": {
+      "get": {
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "tags": [
+          "Coding Agents"
+        ],
+        "operationId": "getNativeDshPluginInventory",
+        "summary": "Discover native DSH preset plugin entries",
+        "description": "Super admin only. Reads the installed CLI dependency graph and native shipped/user preset compositions, recursively flattening groups. Includes disabled entries. Does not execute YAML expressions or connect to the Web runtime. Custom deployment roots and overlays are not resolved. Counts are per preset, not npm package counts. Includes separately counted packages installed in the native Web profile. Runtime phases remain unknown for this static inventory.",
+        "responses": {
+          "200": {
+            "description": "Plugin state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "source": {
+                      "type": "string",
+                      "enum": [
+                        "native-presets"
+                      ]
+                    },
+                    "discovery": {
+                      "type": "string",
+                      "enum": [
+                        "shipped-and-user-roots"
+                      ]
+                    },
+                    "sourceHome": {
+                      "type": "string"
+                    },
+                    "packageVersion": {
+                      "type": "string"
+                    },
+                    "defaultPreset": {
+                      "type": "string"
+                    },
+                    "runtimeConnected": {
+                      "type": "boolean",
+                      "enum": [
+                        false
+                      ]
+                    },
+                    "web": {
+                      "type": "object",
+                      "properties": {
+                        "profile": {
+                          "type": "string",
+                          "enum": [
+                            "web"
+                          ]
+                        },
+                        "sourcePath": {
+                          "type": "string"
+                        },
+                        "revision": {
+                          "type": "string"
+                        },
+                        "packages": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string"
+                              },
+                              "title": {
+                                "type": "string"
+                              },
+                              "description": {
+                                "type": "string"
+                              },
+                              "requested": {
+                                "type": "string"
+                              },
+                              "version": {
+                                "type": "string"
+                              },
+                              "bundle": {
+                                "type": "boolean"
+                              },
+                              "containsBrowserPart": {
+                                "type": "boolean"
+                              },
+                              "sourcePath": {
+                                "type": "string"
+                              },
+                              "error": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "presets": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "type": "string"
+                          },
+                          "trust": {
+                            "type": "string",
+                            "enum": [
+                              "system",
+                              "user"
+                            ]
+                          },
+                          "sourcePath": {
+                            "type": "string"
+                          },
+                          "isDefault": {
+                            "type": "boolean"
+                          },
+                          "error": {
+                            "type": "string"
+                          },
+                          "entries": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "entryId": {
+                                  "type": "string"
+                                },
+                                "title": {
+                                  "type": "string"
+                                },
+                                "description": {
+                                  "type": "string"
+                                },
+                                "moduleName": {
+                                  "type": "string"
+                                },
+                                "configuredEnabled": {
+                                  "oneOf": [
+                                    {
+                                      "type": "boolean"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "enum": [
+                                        "conditional"
+                                      ]
+                                    }
+                                  ]
+                                },
+                                "runtimePhase": {
+                                  "nullable": true,
+                                  "enum": [
+                                    null
+                                  ]
+                                },
+                                "groupPath": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Super admin required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Native inventory unavailable in this installation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Source unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/coding-agents/dsh/session-presets": {
+      "get": {
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "tags": [
+          "Coding Agents"
+        ],
+        "operationId": "listDshSessionPresets",
+        "summary": "List DSH modes available when creating a chat",
+        "description": "Available to authenticated chat users. Returns only preset identifiers, names, descriptions, default and availability; does not expose configuration files or authoring operations.",
+        "responses": {
+          "200": {
+            "description": "Plugin state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "presets"
+                  ],
+                  "properties": {
+                    "presets": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "isDefault"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "type": "string"
+                          },
+                          "isDefault": {
+                            "type": "boolean"
+                          },
+                          "unavailable": {
+                            "type": "boolean"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Native preset service unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "DSH installation unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/coding-agents/dsh/ui-session": {
+      "post": {
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "tags": [
+          "Coding Agents"
+        ],
+        "operationId": "openDshPluginUi",
+        "summary": "Open an authenticated native DSH configuration slot",
+        "description": "Super admin only. Starts the native Web runtime and returns a short-lived scoped frame path. Plugin forms and business APIs are owned by DSH and installed plugins.",
+        "responses": {
+          "200": {
+            "description": "Plugin state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "path": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Super admin required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Native DSH Web runtime unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/coding-agents/dsh/ui-session/{id}": {
+      "delete": {
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "tags": [
+          "Coding Agents"
+        ],
+        "operationId": "closeDshPluginUi",
+        "summary": "Revoke a native plugin frame session",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Frame session revoked"
+          },
+          "403": {
+            "description": "Super admin required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/coding-agents/dsh/web-plugins": {
+      "post": {
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "tags": [
+          "Coding Agents"
+        ],
+        "operationId": "changeDshWebPlugins",
+        "summary": "Install or remove packages in the native Web profile",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Quoted Web manifest revision from plugin-inventory"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "required": [
+                      "action",
+                      "packageSpec"
+                    ],
+                    "properties": {
+                      "action": {
+                        "type": "string",
+                        "enum": [
+                          "install"
+                        ]
+                      },
+                      "packageSpec": {
+                        "type": "string",
+                        "description": "package@exact-version or github:owner/repo#commit"
+                      }
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "action",
+                      "packageName"
+                    ],
+                    "properties": {
+                      "action": {
+                        "type": "string",
+                        "enum": [
+                          "remove"
+                        ]
+                      },
+                      "packageName": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Plugin state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid package selection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Super admin required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another package operation is running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Web profile changed; reload before continuing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Native package command failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "DSH or package manager unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "string"
+                    },
+                    "retryable": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/coding-agents/runs/{sessionId}": {
       "delete": {
         "tags": [
@@ -1349,6 +3280,32 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/api/coding-agents/update-policies": {
+      "get": {
+        "tags": [
+          "Coding Agents"
+        ],
+        "summary": "Get update-policies",
+        "description": "GET /api/coding-agents/update-policies",
+        "operationId": "updatePolicies",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
           }
         }
       }
@@ -1701,6 +3658,227 @@
         }
       }
     },
+    "/api/coding-agents/{id}/mcp/servers": {
+      "get": {
+        "tags": [
+          "Coding Agents"
+        ],
+        "summary": "Get servers",
+        "description": "GET /api/coding-agents/:id/mcp/servers",
+        "operationId": "listMcpServers",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Coding Agents"
+        ],
+        "summary": "Create servers",
+        "description": "POST /api/coding-agents/:id/mcp/servers",
+        "operationId": "addMcpServer",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/coding-agents/{id}/mcp/servers/{name}": {
+      "patch": {
+        "tags": [
+          "Coding Agents"
+        ],
+        "summary": "Update :name",
+        "description": "PATCH /api/coding-agents/:id/mcp/servers/:name",
+        "operationId": "updateMcpServer",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Coding Agents"
+        ],
+        "summary": "Delete :name",
+        "description": "DELETE /api/coding-agents/:id/mcp/servers/:name",
+        "operationId": "removeMcpServer",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/coding-agents/{id}/mcp/servers/{name}/test": {
+      "post": {
+        "tags": [
+          "Coding Agents"
+        ],
+        "summary": "Create test",
+        "description": "POST /api/coding-agents/:id/mcp/servers/:name/test",
+        "operationId": "testMcpServer",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
     "/api/coding-agents/{id}/runs": {
       "post": {
         "tags": [
@@ -1742,6 +3920,9 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "agentPreset": {
+                    "type": "string"
+                  },
                   "apiKey": {
                     "type": "string"
                   },
@@ -1766,6 +3947,57 @@
                     "type": "string"
                   },
                   "sessionId": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/coding-agents/{id}/update-policy": {
+      "put": {
+        "tags": [
+          "Coding Agents"
+        ],
+        "summary": "Update update-policy",
+        "description": "PUT /api/coding-agents/:id/update-policy",
+        "operationId": "setUpdatePolicy",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "autoUpdate": {
                     "type": "string"
                   }
                 }
@@ -7681,7 +9913,10 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "custom"
+              ]
             }
           }
         ]
@@ -7807,7 +10042,10 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "custom"
+              ]
             }
           }
         ]
@@ -10569,17 +12807,105 @@
         }
       }
     },
+    "/api/studio/announcements": {
+      "get": {
+        "tags": [
+          "Announcements"
+        ],
+        "summary": "Get announcements",
+        "description": "GET /api/studio/announcements",
+        "operationId": "getAnnouncements",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "parameters": [
+          {
+            "name": "locale",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/studio/app-connections/{id}/push": {
+      "patch": {
+        "tags": [
+          "App Connections"
+        ],
+        "summary": "Update push",
+        "description": "PATCH /api/studio/app-connections/:id/push",
+        "operationId": "updateAppConnectionPushController",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/studio/app-uploads": {
       "post": {
         "tags": [
           "Studio Files"
         ],
         "summary": "Create app-uploads",
-        "description": "POST /api/studio/app-uploads",
+        "description": "POST /api/studio/app-uploads\nApp session sharing: requires the claimed recipient identity and upload permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.",
         "operationId": "open",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
           }
         ],
         "responses": {
@@ -10613,7 +12939,8 @@
               }
             }
           }
-        }
+        },
+        "x-session-share-permission": "upload"
       }
     },
     "/api/studio/app-uploads/{id}": {
@@ -10622,11 +12949,15 @@
           "Studio Files"
         ],
         "summary": "Delete :id",
-        "description": "DELETE /api/studio/app-uploads/:id",
+        "description": "DELETE /api/studio/app-uploads/:id\nApp session sharing: requires the claimed recipient identity and upload permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.",
         "operationId": "abort",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
           }
         ],
         "responses": {
@@ -10646,7 +12977,8 @@
               "type": "string"
             }
           }
-        ]
+        ],
+        "x-session-share-permission": "upload"
       }
     },
     "/api/studio/app-uploads/{id}/chunks": {
@@ -10655,11 +12987,15 @@
           "Studio Files"
         ],
         "summary": "Update chunks",
-        "description": "PUT /api/studio/app-uploads/:id/chunks",
+        "description": "PUT /api/studio/app-uploads/:id/chunks\nApp session sharing: requires the claimed recipient identity and upload permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.",
         "operationId": "appendChunk",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
           }
         ],
         "responses": {
@@ -10690,7 +13026,8 @@
               "type": "string"
             }
           }
-        ]
+        ],
+        "x-session-share-permission": "upload"
       }
     },
     "/api/studio/app-uploads/{id}/complete": {
@@ -10699,11 +13036,15 @@
           "Studio Files"
         ],
         "summary": "Create complete",
-        "description": "POST /api/studio/app-uploads/:id/complete",
+        "description": "POST /api/studio/app-uploads/:id/complete\nApp session sharing: requires the claimed recipient identity and upload permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.",
         "operationId": "complete",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
           }
         ],
         "responses": {
@@ -10726,7 +13067,8 @@
               "type": "string"
             }
           }
-        ]
+        ],
+        "x-session-share-permission": "upload"
       }
     },
     "/api/studio/chat-run/runs": {
@@ -10735,11 +13077,15 @@
           "Chat Run"
         ],
         "summary": "Run chat and wait for completion",
-        "description": "Starts a DechnicAuditor chat run through the chat-run transport and waits for a terminal result. Use this from HTTP/MCP callers that cannot consume Socket.IO streams.",
+        "description": "Starts a DechnicAuditor chat run through the chat-run transport and waits for a terminal result. Use this from HTTP/MCP callers that cannot consume Socket.IO streams.\nApp session sharing: requires the claimed recipient identity and input permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.",
         "operationId": "runChatOnce",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
           }
         ],
         "requestBody": {
@@ -10838,7 +13184,11 @@
                     "type": "string",
                     "enum": [
                       "claude-code",
-                      "codex"
+                      "codex",
+                      "pi",
+                      "grok",
+                      "opencode",
+                      "ekko-agent"
                     ],
                     "description": "Coding agent id when source is coding_agent."
                   },
@@ -10846,7 +13196,11 @@
                     "type": "string",
                     "enum": [
                       "claude-code",
-                      "codex"
+                      "codex",
+                      "pi",
+                      "grok",
+                      "opencode",
+                      "ekko-agent"
                     ],
                     "description": "Alias for coding_agent_id."
                   },
@@ -10948,7 +13302,8 @@
           "504": {
             "description": "Run timed out"
           }
-        }
+        },
+        "x-session-share-permission": "input"
       }
     },
     "/api/studio/files/copy": {
@@ -11028,11 +13383,15 @@
           "Studio Files"
         ],
         "summary": "Get download",
-        "description": "GET /api/studio/files/download",
+        "description": "GET /api/studio/files/download\nApp session sharing: requires the claimed recipient identity and download permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.",
         "operationId": "download",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
           }
         ],
         "responses": {
@@ -11074,7 +13433,8 @@
               ]
             }
           }
-        ]
+        ],
+        "x-session-share-permission": "download"
       }
     },
     "/api/studio/files/list": {
@@ -12849,6 +15209,9 @@
                   "agentMode": {
                     "type": "string"
                   },
+                  "agentPreset": {
+                    "type": "string"
+                  },
                   "apiMode": {
                     "type": "string"
                   },
@@ -14146,6 +16509,65 @@
         ]
       }
     },
+    "/api/studio/live-activities/registration": {
+      "put": {
+        "tags": [
+          "App Connections"
+        ],
+        "summary": "Update registration",
+        "description": "PUT /api/studio/live-activities/registration",
+        "operationId": "liveActivityRegistrationController",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "App Connections"
+        ],
+        "summary": "Delete registration",
+        "description": "DELETE /api/studio/live-activities/registration",
+        "operationId": "liveActivityRegistrationController",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
     "/api/studio/logs": {
       "get": {
         "tags": [
@@ -14638,6 +17060,180 @@
         }
       }
     },
+    "/api/studio/mobile-calendar/request": {
+      "post": {
+        "tags": [
+          "Chat Run"
+        ],
+        "summary": "Request one-time mobile calendar or reminder access",
+        "description": "Requests a user-confirmed calendar/reminder operation from the App for the exact authenticated direct-chat session. Single-item delete requires exact id, title and occurrence time with fresh App confirmation. Background, workflow, group-chat, and delegated use are not supported.",
+        "operationId": "requestMobileCalendar",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "session_id",
+                  "capability",
+                  "action",
+                  "purpose"
+                ],
+                "properties": {
+                  "session_id": {
+                    "type": "string"
+                  },
+                  "capability": {
+                    "type": "string",
+                    "enum": [
+                      "calendar",
+                      "reminder"
+                    ]
+                  },
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "list",
+                      "create",
+                      "update",
+                      "complete",
+                      "delete"
+                    ]
+                  },
+                  "purpose": {
+                    "type": "string",
+                    "maxLength": 240
+                  },
+                  "start_ms": {
+                    "type": "number"
+                  },
+                  "end_ms": {
+                    "type": "number"
+                  },
+                  "include_completed": {
+                    "type": "boolean"
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100
+                  },
+                  "item": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "timeout_ms": {
+                    "type": "integer",
+                    "minimum": 3000,
+                    "maximum": 300000,
+                    "default": 300000
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Confirmed App result, denial, or sanitized device error"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "description": "Chat run service unavailable"
+          }
+        }
+      }
+    },
+    "/api/studio/mobile-health/request": {
+      "post": {
+        "tags": [
+          "Chat Run"
+        ],
+        "summary": "Create request",
+        "description": "POST /api/studio/mobile-health/request",
+        "operationId": "requestMobileHealth",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/studio/mobile-location/request": {
+      "post": {
+        "tags": [
+          "Chat Run"
+        ],
+        "summary": "Create request",
+        "description": "POST /api/studio/mobile-location/request",
+        "operationId": "requestMobileLocation",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/studio/performance/runtime": {
       "get": {
         "tags": [
@@ -14862,6 +17458,65 @@
         }
       }
     },
+    "/api/studio/push/registration": {
+      "put": {
+        "tags": [
+          "App Connections"
+        ],
+        "summary": "Update registration",
+        "description": "PUT /api/studio/push/registration",
+        "operationId": "pushRegistrationController",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "App Connections"
+        ],
+        "summary": "Delete registration",
+        "description": "DELETE /api/studio/push/registration",
+        "operationId": "pushRegistrationController",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
     "/api/studio/search/sessions": {
       "get": {
         "tags": [
@@ -15070,6 +17725,191 @@
         ]
       }
     },
+    "/api/studio/session-shares/access": {
+      "get": {
+        "tags": [
+          "Session Shares"
+        ],
+        "summary": "Get access",
+        "description": "GET /api/studio/session-shares/access",
+        "operationId": "getSessionShareAccess",
+        "security": [
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid App identity / Studio App device credential"
+          },
+          "403": {
+            "description": "Recipient, session, resource, owner or permission mismatch"
+          },
+          "404": {
+            "description": "Share not found"
+          },
+          "409": {
+            "description": "Already claimed by another App user, or concurrent policy change"
+          },
+          "410": {
+            "description": "Share expired or revoked"
+          },
+          "503": {
+            "description": "Identity verification or transactional storage unavailable"
+          }
+        },
+        "parameters": []
+      }
+    },
+    "/api/studio/session-shares/check": {
+      "post": {
+        "tags": [
+          "Session Shares"
+        ],
+        "summary": "Create check",
+        "description": "POST /api/studio/session-shares/check",
+        "operationId": "checkSessionSharePermission",
+        "security": [
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "description": "Missing or invalid App identity / Studio App device credential"
+          },
+          "403": {
+            "description": "Recipient, session, resource, owner or permission mismatch"
+          },
+          "404": {
+            "description": "Share not found"
+          },
+          "409": {
+            "description": "Already claimed by another App user, or concurrent policy change"
+          },
+          "410": {
+            "description": "Share expired or revoked"
+          },
+          "503": {
+            "description": "Identity verification or transactional storage unavailable"
+          }
+        },
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "action",
+                  "sessionId"
+                ],
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "read",
+                      "input",
+                      "voice",
+                      "upload",
+                      "download",
+                      "workspaceRead",
+                      "workspaceWrite",
+                      "outsideWorkspace",
+                      "terminal",
+                      "switchModel",
+                      "reasoningEffort",
+                      "switchWorkspace"
+                    ]
+                  },
+                  "sessionId": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/studio/session-shares/claim": {
+      "post": {
+        "tags": [
+          "Session Shares"
+        ],
+        "summary": "Create claim",
+        "description": "POST /api/studio/session-shares/claim",
+        "operationId": "claimSessionShare",
+        "security": [
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "description": "Missing or invalid App identity / Studio App device credential"
+          },
+          "403": {
+            "description": "Recipient, session, resource, owner or permission mismatch"
+          },
+          "404": {
+            "description": "Share not found"
+          },
+          "409": {
+            "description": "Already claimed by another App user, or concurrent policy change"
+          },
+          "410": {
+            "description": "Share expired or revoked"
+          },
+          "503": {
+            "description": "Identity verification or transactional storage unavailable"
+          }
+        },
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "confirm"
+                ],
+                "properties": {
+                  "confirm": {
+                    "type": "boolean",
+                    "enum": [
+                      true
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/studio/sessions": {
       "get": {
         "tags": [
@@ -15085,7 +17925,42 @@
         ],
         "responses": {
           "200": {
-            "description": "Success"
+            "description": "Session list. Supplying offset also returns pagination metadata and the total matching the same visibility, category, and include/exclude filters before pagination.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "sessions"
+                  ],
+                  "properties": {
+                    "sessions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                      }
+                    },
+                    "total": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "Total matching sessions, independent of offset and limit. Present when offset is supplied."
+                    },
+                    "hasMore": {
+                      "type": "boolean"
+                    },
+                    "offset": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "limit": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  }
+                }
+              }
+            }
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -15096,12 +17971,78 @@
         },
         "parameters": [
           {
+            "name": "category",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "oneOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "none",
+                    "pinned"
+                  ]
+                }
+              ]
+            },
+            "description": "Filter by category ID; none selects uncategorized sessions, pinned selects database-pinned sessions."
+          },
+          {
+            "name": "exclude",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "style": "form",
+            "explode": true,
+            "description": "Repeat this parameter for each session ID."
+          },
+          {
+            "name": "include",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "style": "form",
+            "explode": true,
+            "description": "Repeat this parameter for each session ID."
+          },
+          {
             "name": "limit",
             "in": "query",
             "required": false,
             "schema": {
               "type": "integer"
             }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "pinned",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Filter by database pin state before pagination and counting. The pinned category takes precedence."
           },
           {
             "name": "source",
@@ -15264,11 +18205,15 @@
           "Sessions"
         ],
         "summary": "Get messages",
-        "description": "GET /api/studio/sessions/conversations/:id/messages",
+        "description": "GET /api/studio/sessions/conversations/:id/messages\nApp session sharing: requires the claimed recipient identity and read permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.",
         "operationId": "getConversationMessages",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
           }
         ],
         "responses": {
@@ -15302,7 +18247,8 @@
               ]
             }
           }
-        ]
+        ],
+        "x-session-share-permission": "read"
       }
     },
     "/api/studio/sessions/conversations/{id}/messages/paginated": {
@@ -15311,11 +18257,15 @@
           "Sessions"
         ],
         "summary": "Get paginated",
-        "description": "GET /api/studio/sessions/conversations/:id/messages/paginated",
+        "description": "GET /api/studio/sessions/conversations/:id/messages/paginated\nApp session sharing: requires the claimed recipient identity and read permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.",
         "operationId": "getConversationMessagesPaginated",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
           }
         ],
         "responses": {
@@ -15354,7 +18304,8 @@
               "type": "integer"
             }
           }
-        ]
+        ],
+        "x-session-share-permission": "read"
       }
     },
     "/api/studio/sessions/count": {
@@ -15658,11 +18609,15 @@
           "Sessions"
         ],
         "summary": "Get :id",
-        "description": "GET /api/studio/sessions/:id",
+        "description": "GET /api/studio/sessions/:id\nApp session sharing: requires the claimed recipient identity and read permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.",
         "operationId": "get",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
           }
         ],
         "responses": {
@@ -15685,7 +18640,8 @@
               "type": "string"
             }
           }
-        ]
+        ],
+        "x-session-share-permission": "read"
       },
       "delete": {
         "tags": [
@@ -15809,11 +18765,15 @@
           "Sessions"
         ],
         "summary": "Get context",
-        "description": "GET /api/studio/sessions/:id/context",
+        "description": "GET /api/studio/sessions/:id/context\nApp session sharing: requires the claimed recipient identity and read permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.",
         "operationId": "getContext",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
           }
         ],
         "responses": {
@@ -15836,7 +18796,8 @@
               "type": "string"
             }
           }
-        ]
+        ],
+        "x-session-share-permission": "read"
       }
     },
     "/api/studio/sessions/{id}/export": {
@@ -15845,11 +18806,15 @@
           "Sessions"
         ],
         "summary": "Get export",
-        "description": "GET /api/studio/sessions/:id/export",
+        "description": "GET /api/studio/sessions/:id/export\nApp session sharing: requires the claimed recipient identity and download permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.",
         "operationId": "exportSession",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
           }
         ],
         "responses": {
@@ -15895,7 +18860,8 @@
               ]
             }
           }
-        ]
+        ],
+        "x-session-share-permission": "download"
       }
     },
     "/api/studio/sessions/{id}/model": {
@@ -15904,11 +18870,15 @@
           "Sessions"
         ],
         "summary": "Create model",
-        "description": "POST /api/studio/sessions/:id/model",
+        "description": "POST /api/studio/sessions/:id/model\nApp session sharing: requires the claimed recipient identity and switchModel permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.",
         "operationId": "setModel",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
           }
         ],
         "responses": {
@@ -15965,6 +18935,61 @@
                 "required": [
                   "model"
                 ]
+              }
+            }
+          }
+        },
+        "x-session-share-permission": "switchModel"
+      }
+    },
+    "/api/studio/sessions/{id}/pin": {
+      "post": {
+        "tags": [
+          "Sessions"
+        ],
+        "summary": "Create pin",
+        "description": "POST /api/studio/sessions/:id/pin",
+        "operationId": "setPinned",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "is_pinned"
+                ],
+                "properties": {
+                  "is_pinned": {
+                    "type": "boolean"
+                  }
+                }
               }
             }
           }
@@ -16025,11 +19050,15 @@
           "Sessions"
         ],
         "summary": "Create reasoning-effort",
-        "description": "POST /api/studio/sessions/:id/reasoning-effort",
+        "description": "POST /api/studio/sessions/:id/reasoning-effort\nApp session sharing: requires the claimed recipient identity and reasoningEffort permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.",
         "operationId": "setReasoningEffort",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
           }
         ],
         "responses": {
@@ -16064,7 +19093,8 @@
               }
             }
           }
-        }
+        },
+        "x-session-share-permission": "reasoningEffort"
       }
     },
     "/api/studio/sessions/{id}/rename": {
@@ -16121,6 +19151,398 @@
         }
       }
     },
+    "/api/studio/sessions/{id}/share-context-length": {
+      "get": {
+        "tags": [
+          "Sessions"
+        ],
+        "summary": "Get share-context-length",
+        "description": "Read or edit the current shared Hermes/Ekko model context limit. Profile and session are server-bound. Writes require switchModel and matching current provider/model; the value is model-level within the shared Profile. Coding Agents do not support this operation.",
+        "operationId": "getSessionShareContextLength",
+        "security": [
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current context limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "context_length"
+                  ],
+                  "properties": {
+                    "context_length": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Permission denied or session/profile mismatch"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "410": {
+            "description": "Share expired or revoked"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-session-share-permission": "read"
+      },
+      "put": {
+        "tags": [
+          "Sessions"
+        ],
+        "summary": "Update share-context-length",
+        "description": "Read or edit the current shared Hermes/Ekko model context limit. Profile and session are server-bound. Writes require switchModel and matching current provider/model; the value is model-level within the shared Profile. Coding Agents do not support this operation.",
+        "operationId": "setSessionShareContextLength",
+        "security": [
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current context limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "context_length"
+                  ],
+                  "properties": {
+                    "context_length": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Permission denied or session/profile mismatch"
+          },
+          "410": {
+            "description": "Share expired or revoked"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "provider",
+                  "model",
+                  "context_limit"
+                ],
+                "properties": {
+                  "provider": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "model": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "context_limit": {
+                    "type": "integer",
+                    "minimum": 1000,
+                    "maximum": 10000000
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-session-share-permission": "switchModel"
+      }
+    },
+    "/api/studio/sessions/{id}/share-models": {
+      "get": {
+        "tags": [
+          "Sessions"
+        ],
+        "summary": "Get share-models",
+        "description": "Selectable models for this session. Returns provider/model labels and IDs without provider secrets or endpoints. GET /api/studio/sessions/:id/share-models\nApp session sharing: requires the claimed recipient identity and switchModel permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.",
+        "operationId": "models",
+        "security": [
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-session-share-permission": "switchModel"
+      }
+    },
+    "/api/studio/sessions/{id}/share-voice/synthesize": {
+      "post": {
+        "tags": [
+          "Sessions"
+        ],
+        "summary": "Create synthesize",
+        "description": "Requires voice permission on the claimed shared session. Uses the share-bound Profile active speech provider and stored settings; provider, credential and option overrides are rejected. No upload permission is required. Sending recognized text additionally requires input.",
+        "operationId": "synthesizeSessionShareSpeech",
+        "security": [
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "MP3 speech audio",
+            "content": {
+              "audio/mpeg": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid text/audio, unsupported provider or missing host configuration"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Voice permission denied or session/profile mismatch"
+          },
+          "410": {
+            "description": "Share expired or revoked"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "text"
+                ],
+                "properties": {
+                  "text": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 5000
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-session-share-permission": "voice"
+      }
+    },
+    "/api/studio/sessions/{id}/share-voice/transcribe": {
+      "post": {
+        "tags": [
+          "Sessions"
+        ],
+        "summary": "Create transcribe",
+        "description": "Requires voice permission on the claimed shared session. Uses the share-bound Profile active speech provider and stored settings; provider, credential and option overrides are rejected. No upload permission is required. Sending recognized text additionally requires input.",
+        "operationId": "transcribeSessionShareSpeech",
+        "security": [
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Recognized speech; text is empty when no speech is detected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "text": {
+                      "type": "string"
+                    },
+                    "provider": {
+                      "type": "string"
+                    },
+                    "model": {
+                      "type": "string"
+                    },
+                    "durationMs": {
+                      "type": "number"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid text/audio, unsupported provider or missing host configuration"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "Voice permission denied or session/profile mismatch"
+          },
+          "410": {
+            "description": "Share expired or revoked"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "x-session-share-permission": "voice",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "audio"
+                ],
+                "properties": {
+                  "audio": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/studio/sessions/{id}/share-workspaces": {
+      "get": {
+        "tags": [
+          "Sessions"
+        ],
+        "summary": "Get share-workspaces",
+        "description": "Browse only directories that this share may select as workspace. Empty path returns authorized roots; an absolute path returns child directories. GET /api/studio/sessions/:id/share-workspaces\nApp session sharing: requires the claimed recipient identity and switchWorkspace permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.",
+        "operationId": "workspaces",
+        "security": [
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "path",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Existing absolute directory in the share scope. Omit to list authorized roots."
+          }
+        ],
+        "x-session-share-permission": "switchWorkspace"
+      }
+    },
     "/api/studio/sessions/{id}/unarchive": {
       "post": {
         "tags": [
@@ -16163,11 +19585,15 @@
           "Sessions"
         ],
         "summary": "Get usage",
-        "description": "GET /api/studio/sessions/:id/usage",
+        "description": "GET /api/studio/sessions/:id/usage\nApp session sharing: requires the claimed recipient identity and read permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.",
         "operationId": "usageSingle",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
           }
         ],
         "responses": {
@@ -16190,7 +19616,8 @@
               "type": "string"
             }
           }
-        ]
+        ],
+        "x-session-share-permission": "read"
       }
     },
     "/api/studio/sessions/{id}/workspace": {
@@ -16199,11 +19626,15 @@
           "Sessions"
         ],
         "summary": "Create workspace",
-        "description": "POST /api/studio/sessions/:id/workspace",
+        "description": "POST /api/studio/sessions/:id/workspace\nApp session sharing: requires the claimed recipient identity and switchWorkspace permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.",
         "operationId": "setWorkspace",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
           }
         ],
         "responses": {
@@ -16241,7 +19672,8 @@
               }
             }
           }
-        }
+        },
+        "x-session-share-permission": "switchWorkspace"
       }
     },
     "/api/studio/sessions/{id}/workspace-file/content": {
@@ -16250,11 +19682,15 @@
           "Sessions"
         ],
         "summary": "Get content",
-        "description": "GET /api/studio/sessions/:id/workspace-file/content",
+        "description": "GET /api/studio/sessions/:id/workspace-file/content\nApp session sharing: requires the claimed recipient identity and workspaceRead permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.",
         "operationId": "readWorkspaceFileContent",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
           }
         ],
         "responses": {
@@ -16301,7 +19737,8 @@
               "type": "boolean"
             }
           }
-        ]
+        ],
+        "x-session-share-permission": "workspaceRead"
       }
     },
     "/api/studio/sessions/{id}/workspace-file/copy": {
@@ -16310,11 +19747,15 @@
           "Sessions"
         ],
         "summary": "Create copy",
-        "description": "POST /api/studio/sessions/:id/workspace-file/copy",
+        "description": "POST /api/studio/sessions/:id/workspace-file/copy\nApp session sharing: requires the claimed recipient identity and workspaceWrite permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.",
         "operationId": "copyWorkspaceFile",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
           }
         ],
         "responses": {
@@ -16357,7 +19798,8 @@
               }
             }
           }
-        }
+        },
+        "x-session-share-permission": "workspaceWrite"
       }
     },
     "/api/studio/sessions/{id}/workspace-file/delete": {
@@ -16366,11 +19808,15 @@
           "Sessions"
         ],
         "summary": "Delete delete",
-        "description": "DELETE /api/studio/sessions/:id/workspace-file/delete",
+        "description": "DELETE /api/studio/sessions/:id/workspace-file/delete\nApp session sharing: requires the claimed recipient identity and workspaceWrite permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.",
         "operationId": "deleteWorkspaceFile",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
           }
         ],
         "responses": {
@@ -16390,7 +19836,8 @@
               "type": "string"
             }
           }
-        ]
+        ],
+        "x-session-share-permission": "workspaceWrite"
       }
     },
     "/api/studio/sessions/{id}/workspace-file/diff": {
@@ -16399,11 +19846,15 @@
           "Sessions"
         ],
         "summary": "Get diff",
-        "description": "GET /api/studio/sessions/:id/workspace-file/diff",
+        "description": "GET /api/studio/sessions/:id/workspace-file/diff\nApp session sharing: requires the claimed recipient identity and workspaceRead permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.",
         "operationId": "diffWorkspaceFile",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
           }
         ],
         "responses": {
@@ -16434,7 +19885,8 @@
               "type": "string"
             }
           }
-        ]
+        ],
+        "x-session-share-permission": "workspaceRead"
       }
     },
     "/api/studio/sessions/{id}/workspace-file/mkdir": {
@@ -16443,11 +19895,15 @@
           "Sessions"
         ],
         "summary": "Create mkdir",
-        "description": "POST /api/studio/sessions/:id/workspace-file/mkdir",
+        "description": "POST /api/studio/sessions/:id/workspace-file/mkdir\nApp session sharing: requires the claimed recipient identity and workspaceWrite permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.",
         "operationId": "mkdirWorkspaceFile",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
           }
         ],
         "responses": {
@@ -16486,7 +19942,8 @@
               }
             }
           }
-        }
+        },
+        "x-session-share-permission": "workspaceWrite"
       }
     },
     "/api/studio/sessions/{id}/workspace-file/read": {
@@ -16495,11 +19952,15 @@
           "Sessions"
         ],
         "summary": "Get read",
-        "description": "GET /api/studio/sessions/:id/workspace-file/read",
+        "description": "GET /api/studio/sessions/:id/workspace-file/read\nApp session sharing: requires the claimed recipient identity and workspaceRead permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.",
         "operationId": "readWorkspaceFile",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
           }
         ],
         "responses": {
@@ -16530,7 +19991,8 @@
               "type": "string"
             }
           }
-        ]
+        ],
+        "x-session-share-permission": "workspaceRead"
       }
     },
     "/api/studio/sessions/{id}/workspace-file/rename": {
@@ -16539,11 +20001,15 @@
           "Sessions"
         ],
         "summary": "Create rename",
-        "description": "POST /api/studio/sessions/:id/workspace-file/rename",
+        "description": "POST /api/studio/sessions/:id/workspace-file/rename\nApp session sharing: requires the claimed recipient identity and workspaceWrite permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.",
         "operationId": "renameWorkspaceFile",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
           }
         ],
         "responses": {
@@ -16586,7 +20052,8 @@
               }
             }
           }
-        }
+        },
+        "x-session-share-permission": "workspaceWrite"
       }
     },
     "/api/studio/sessions/{id}/workspace-file/write": {
@@ -16595,11 +20062,15 @@
           "Sessions"
         ],
         "summary": "Update write",
-        "description": "PUT /api/studio/sessions/:id/workspace-file/write",
+        "description": "PUT /api/studio/sessions/:id/workspace-file/write\nApp session sharing: requires the claimed recipient identity and workspaceWrite permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.",
         "operationId": "writeWorkspaceFile",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
           }
         ],
         "responses": {
@@ -16642,7 +20113,8 @@
               }
             }
           }
-        }
+        },
+        "x-session-share-permission": "workspaceWrite"
       }
     },
     "/api/studio/sessions/{id}/workspace-files/list": {
@@ -16651,11 +20123,15 @@
           "Sessions"
         ],
         "summary": "Get list",
-        "description": "GET /api/studio/sessions/:id/workspace-files/list",
+        "description": "GET /api/studio/sessions/:id/workspace-files/list\nApp session sharing: requires the claimed recipient identity and workspaceRead permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.",
         "operationId": "listWorkspaceFiles",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
           }
         ],
         "responses": {
@@ -16686,7 +20162,8 @@
               "type": "string"
             }
           }
-        ]
+        ],
+        "x-session-share-permission": "workspaceRead"
       }
     },
     "/api/studio/sessions/{id}/workspace-run-changes": {
@@ -16695,11 +20172,15 @@
           "Sessions"
         ],
         "summary": "Get workspace-run-changes",
-        "description": "GET /api/studio/sessions/:id/workspace-run-changes",
+        "description": "GET /api/studio/sessions/:id/workspace-run-changes\nApp session sharing: requires the claimed recipient identity and workspaceRead permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.",
         "operationId": "listWorkspaceRunChanges",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
           }
         ],
         "responses": {
@@ -16722,7 +20203,8 @@
               "type": "string"
             }
           }
-        ]
+        ],
+        "x-session-share-permission": "workspaceRead"
       }
     },
     "/api/studio/sessions/{id}/workspace-run-changes/{changeId}/files/{fileId}": {
@@ -16731,11 +20213,15 @@
           "Sessions"
         ],
         "summary": "Get :fileId",
-        "description": "GET /api/studio/sessions/:id/workspace-run-changes/:changeId/files/:fileId",
+        "description": "GET /api/studio/sessions/:id/workspace-run-changes/:changeId/files/:fileId\nApp session sharing: requires the claimed recipient identity and workspaceRead permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.",
         "operationId": "getWorkspaceRunChangeFile",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
           }
         ],
         "responses": {
@@ -16772,6 +20258,435 @@
             "required": true,
             "schema": {
               "type": "integer"
+            }
+          }
+        ],
+        "x-session-share-permission": "workspaceRead"
+      }
+    },
+    "/api/studio/sessions/{sessionId}/shares": {
+      "post": {
+        "tags": [
+          "Session Shares"
+        ],
+        "summary": "Create shares",
+        "description": "POST /api/studio/sessions/:sessionId/shares",
+        "operationId": "createSessionShare",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "New independent invitation; secret is returned only at creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "share",
+                    "token"
+                  ],
+                  "properties": {
+                    "share": {
+                      "$ref": "#/components/schemas/SessionShare"
+                    },
+                    "token": {
+                      "type": "string",
+                      "pattern": "^sst1_[A-Za-z0-9_-]{43}$"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "description": "Missing or invalid App identity / Studio App device credential"
+          },
+          "403": {
+            "description": "Recipient, session, resource, owner or permission mismatch"
+          },
+          "404": {
+            "description": "Share not found"
+          },
+          "409": {
+            "description": "Already claimed by another App user, or concurrent policy change"
+          },
+          "410": {
+            "description": "Share expired or revoked"
+          },
+          "503": {
+            "description": "Identity verification or transactional storage unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "permissions": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "input": {
+                        "type": "boolean",
+                        "default": false
+                      },
+                      "voice": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Use session-scoped speech transcription and synthesis with the sharer Profile voice settings. Sending transcribed messages still requires input. Defaults to false for existing shares."
+                      },
+                      "upload": {
+                        "type": "boolean",
+                        "default": false
+                      },
+                      "download": {
+                        "type": "boolean",
+                        "default": false
+                      },
+                      "workspaceRead": {
+                        "type": "boolean",
+                        "default": false
+                      },
+                      "workspaceWrite": {
+                        "type": "boolean",
+                        "default": false
+                      },
+                      "outsideWorkspace": {
+                        "type": "boolean",
+                        "default": false
+                      },
+                      "terminal": {
+                        "type": "boolean",
+                        "default": false
+                      },
+                      "switchModel": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Change the shared session model using the scoped share-models catalog, and edit the current Hermes/Ekko model context limit. Does not grant reasoning-effort changes."
+                      },
+                      "reasoningEffort": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Change the shared session reasoning effort independently of model selection."
+                      },
+                      "switchWorkspace": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Select an existing directory within the original workspace, or an explicit extraPaths grant when outsideWorkspace is enabled. Does not grant filesystem read/write or expand the share scope."
+                      }
+                    }
+                  },
+                  "extraPaths": {
+                    "type": "array",
+                    "maxItems": 16,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "path",
+                        "writable"
+                      ],
+                      "properties": {
+                        "path": {
+                          "type": "string",
+                          "description": "Existing absolute directory explicitly allowed outside the session workspace. Super administrator only."
+                        },
+                        "writable": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  },
+                  "sharer": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "name"
+                    ],
+                    "description": "App-provided attribution only. Management authority comes from the authenticated local Studio owner, not this metadata.",
+                    "properties": {
+                      "id": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "name": {
+                        "type": "string",
+                        "maxLength": 200
+                      }
+                    }
+                  }
+                },
+                "required": [
+                  "sharer"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Session Shares"
+        ],
+        "summary": "List shares",
+        "description": "GET /api/studio/sessions/:sessionId/shares",
+        "operationId": "listSessionShares",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid App identity / Studio App device credential"
+          },
+          "403": {
+            "description": "Recipient, session, resource, owner or permission mismatch"
+          },
+          "404": {
+            "description": "Share not found"
+          },
+          "409": {
+            "description": "Already claimed by another App user, or concurrent policy change"
+          },
+          "410": {
+            "description": "Share expired or revoked"
+          },
+          "503": {
+            "description": "Identity verification or transactional storage unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/studio/sessions/{sessionId}/shares/{shareId}": {
+      "patch": {
+        "tags": [
+          "Session Shares"
+        ],
+        "summary": "Update :shareId",
+        "description": "PATCH /api/studio/sessions/:sessionId/shares/:shareId",
+        "operationId": "updateSessionShare",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "description": "Missing or invalid App identity / Studio App device credential"
+          },
+          "403": {
+            "description": "Recipient, session, resource, owner or permission mismatch"
+          },
+          "404": {
+            "description": "Share not found"
+          },
+          "409": {
+            "description": "Already claimed by another App user, or concurrent policy change"
+          },
+          "410": {
+            "description": "Share expired or revoked"
+          },
+          "503": {
+            "description": "Identity verification or transactional storage unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "shareId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "permissions": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "input": {
+                        "type": "boolean",
+                        "default": false
+                      },
+                      "voice": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Use session-scoped speech transcription and synthesis with the sharer Profile voice settings. Sending transcribed messages still requires input. Defaults to false for existing shares."
+                      },
+                      "upload": {
+                        "type": "boolean",
+                        "default": false
+                      },
+                      "download": {
+                        "type": "boolean",
+                        "default": false
+                      },
+                      "workspaceRead": {
+                        "type": "boolean",
+                        "default": false
+                      },
+                      "workspaceWrite": {
+                        "type": "boolean",
+                        "default": false
+                      },
+                      "outsideWorkspace": {
+                        "type": "boolean",
+                        "default": false
+                      },
+                      "terminal": {
+                        "type": "boolean",
+                        "default": false
+                      },
+                      "switchModel": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Change the shared session model using the scoped share-models catalog, and edit the current Hermes/Ekko model context limit. Does not grant reasoning-effort changes."
+                      },
+                      "reasoningEffort": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Change the shared session reasoning effort independently of model selection."
+                      },
+                      "switchWorkspace": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Select an existing directory within the original workspace, or an explicit extraPaths grant when outsideWorkspace is enabled. Does not grant filesystem read/write or expand the share scope."
+                      }
+                    }
+                  },
+                  "extraPaths": {
+                    "type": "array",
+                    "maxItems": 16,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "path",
+                        "writable"
+                      ],
+                      "properties": {
+                        "path": {
+                          "type": "string",
+                          "description": "Existing absolute directory explicitly allowed outside the session workspace. Super administrator only."
+                        },
+                        "writable": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Session Shares"
+        ],
+        "summary": "Delete :shareId",
+        "description": "DELETE /api/studio/sessions/:sessionId/shares/:shareId",
+        "operationId": "revokeSessionShare",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "description": "Missing or invalid App identity / Studio App device credential"
+          },
+          "403": {
+            "description": "Recipient, session, resource, owner or permission mismatch"
+          },
+          "404": {
+            "description": "Share not found"
+          },
+          "409": {
+            "description": "Already claimed by another App user, or concurrent policy change"
+          },
+          "410": {
+            "description": "Share expired or revoked"
+          },
+          "503": {
+            "description": "Identity verification or transactional storage unavailable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "shareId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
             }
           }
         ]
@@ -17858,11 +21773,15 @@
           "Studio Files"
         ],
         "summary": "Create uploads",
-        "description": "POST /api/studio/uploads",
+        "description": "POST /api/studio/uploads\nApp session sharing: requires the claimed recipient identity and upload permission; scope is fixed to the shared session. workspace-file/content with download=1 requires download instead. Agent and terminal execution retain existing host permissions.",
         "operationId": "handleUpload",
         "security": [
           {
             "BearerAuth": []
+          },
+          {
+            "AppAccessToken": [],
+            "SessionShareToken": []
           }
         ],
         "responses": {
@@ -17875,7 +21794,8 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           }
-        }
+        },
+        "x-session-share-permission": "upload"
       }
     },
     "/api/studio/usage/stats": {
@@ -19523,6 +23443,187 @@
         }
       }
     },
+    "/api/studio/task-plans/update": {
+      "post": {
+        "tags": [
+          "Chat Run"
+        ],
+        "summary": "Update the current turn task plan",
+        "operationId": "updateTaskPlan",
+        "description": "Update the full ordered plan using the context_id injected into the current run instructions. Expired contexts and other profiles are rejected. Updates are persisted and emitted as plan.updated.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "context_id",
+                  "plan"
+                ],
+                "properties": {
+                  "context_id": {
+                    "type": "string"
+                  },
+                  "explanation": {
+                    "type": "string",
+                    "maxLength": 1000
+                  },
+                  "plan": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 30,
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "step",
+                        "status"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 100
+                        },
+                        "step": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "pending",
+                            "in_progress",
+                            "completed"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Persisted task plan snapshot with session_id, run_id, plan_id, revision, execution_state, explanation, plan, created_at and updated_at (milliseconds)."
+          },
+          "400": {
+            "description": "Invalid plan; at most one step can be in_progress and step ids must be unique."
+          },
+          "409": {
+            "description": "Context expired, belongs to another profile, or has no active turn."
+          },
+          "503": {
+            "description": "Chat run service unavailable."
+          }
+        }
+      }
+    },
+    "/api/studio/clarifications/request": {
+      "post": {
+        "tags": [
+          "Chat Run"
+        ],
+        "summary": "Ask a user clarification in the current coding-agent turn",
+        "operationId": "requestClarification",
+        "description": "Requires the current interaction context_id and matching authenticated profile. Emits clarify.requested in Studio/App, waits up to five minutes, and returns the answer or an explicit timeout/dismissed/cancelled reason. Expired contexts cannot prompt a later turn. Caller-supplied session/run ids are ignored.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "context_id",
+                  "question"
+                ],
+                "properties": {
+                  "context_id": {
+                    "type": "string"
+                  },
+                  "question": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4000
+                  },
+                  "choices": {
+                    "type": "array",
+                    "maxItems": 20,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 500
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Clarification settled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "ok",
+                    "clarify_id",
+                    "response",
+                    "reason"
+                  ],
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "clarify_id": {
+                      "type": "string"
+                    },
+                    "response": {
+                      "type": "string"
+                    },
+                    "reason": {
+                      "type": "string",
+                      "enum": [
+                        "response",
+                        "dismissed",
+                        "timeout",
+                        "cancelled"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing context or invalid question/choices."
+          },
+          "409": {
+            "description": "Expired or inactive context, wrong profile, or another question is pending."
+          },
+          "503": {
+            "description": "Chat run service unavailable."
+          }
+        }
+      }
+    },
     "/api/hermes/terminal": {
       "get": {
         "tags": [
@@ -19548,9 +23649,132 @@
         "type": "http",
         "scheme": "bearer",
         "bearerFormat": "API Token"
+      },
+      "AppAccessToken": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-App-Access-Token",
+        "description": "Cloud App access token, verified against /api/app/auth/me."
+      },
+      "SessionShareToken": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Session-Share-Token",
+        "description": "sst1_ invitation secret; never accepted as a Studio login JWT."
       }
     },
-    "schemas": {},
+    "schemas": {
+      "SessionShare": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "sharer_app_user_id": {
+            "type": "integer"
+          },
+          "sharer_name_snapshot": {
+            "type": "string"
+          },
+          "recipient_app_user_id": {
+            "type": "integer",
+            "nullable": true
+          },
+          "recipient_name_snapshot": {
+            "type": "string",
+            "nullable": true
+          },
+          "permissions": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "input": {
+                "type": "boolean",
+                "default": false
+              },
+              "voice": {
+                "type": "boolean",
+                "default": false,
+                "description": "Use session-scoped speech transcription and synthesis with the sharer Profile voice settings. Sending transcribed messages still requires input. Defaults to false for existing shares."
+              },
+              "upload": {
+                "type": "boolean",
+                "default": false
+              },
+              "download": {
+                "type": "boolean",
+                "default": false
+              },
+              "workspaceRead": {
+                "type": "boolean",
+                "default": false
+              },
+              "workspaceWrite": {
+                "type": "boolean",
+                "default": false
+              },
+              "outsideWorkspace": {
+                "type": "boolean",
+                "default": false
+              },
+              "terminal": {
+                "type": "boolean",
+                "default": false
+              },
+              "switchModel": {
+                "type": "boolean",
+                "default": false,
+                "description": "Change the shared session model using the scoped share-models catalog, and edit the current Hermes/Ekko model context limit. Does not grant reasoning-effort changes."
+              },
+              "reasoningEffort": {
+                "type": "boolean",
+                "default": false,
+                "description": "Change the shared session reasoning effort independently of model selection."
+              },
+              "switchWorkspace": {
+                "type": "boolean",
+                "default": false,
+                "description": "Select an existing directory within the original workspace, or an explicit extraPaths grant when outsideWorkspace is enabled. Does not grant filesystem read/write or expand the share scope."
+              }
+            }
+          },
+          "policy_version": {
+            "type": "integer"
+          },
+          "created_at": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Unix epoch milliseconds"
+          },
+          "updated_at": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Unix epoch milliseconds"
+          },
+          "expires_at": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Unix epoch milliseconds"
+          },
+          "claimed_at": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Unix epoch milliseconds",
+            "nullable": true
+          },
+          "revoked_at": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Unix epoch milliseconds",
+            "nullable": true
+          }
+        }
+      }
+    },
     "responses": {
       "Unauthorized": {
         "description": "Unauthorized - Invalid or missing authentication token",

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 
@@ -143,6 +143,49 @@ describe('coding agent Windows process launch', () => {
     } finally {
       if (originalDatabaseUrl === undefined) delete process.env.DATABASE_URL
       else process.env.DATABASE_URL = originalDatabaseUrl
+      rmSync(grokHome, { recursive: true, force: true })
+    }
+  })
+
+  it('resumes a Grok session that persisted before an error event ended the first turn', () => {
+    const grokHome = mkdtempSync(join(tmpdir(), 'hermes-grok-resume-'))
+    try {
+      const manager = new CodingAgentRunManager()
+      ;(manager as any).handleClaudePrintResponseEvent = vi.fn()
+      const sessionId = '11111111-1111-4111-8111-111111111111'
+      const workspaceDir = process.cwd()
+      mkdirSync(join(grokHome, 'sessions', encodeURIComponent(workspaceDir), sessionId), { recursive: true })
+      const run: any = {
+        id: 'agent-session-grok-resume',
+        launch: {
+          agentSessionId: 'agent-session-grok-resume',
+          agentNativeSessionId: sessionId,
+          agentId: 'grok',
+          mode: 'scoped',
+          profile: 'default',
+          provider: 'custom',
+          model: 'test-model',
+          sessionId: 'chat-session-grok-resume',
+          command: 'C:\\Tools\\grok.cmd',
+          args: ['--always-approve'],
+          shellCommand: 'grok',
+          workspaceDir,
+          env: { GROK_HOME: grokHome },
+        },
+        state: { messages: [], isWorking: false, events: [], queue: [] },
+        lastActiveAt: Date.now(),
+        startedAt: Date.now(),
+        exited: false,
+        nativeResumeReady: false,
+      }
+
+      ;(manager as any).startGrokPrintTurn(run, 'retry')
+
+      const commandLine = JSON.stringify(testState.spawnCalls[0]?.args)
+      expect(commandLine).toContain('--resume')
+      expect(commandLine).not.toContain('--session-id')
+      expect(run.nativeResumeReady).toBe(true)
+    } finally {
       rmSync(grokHome, { recursive: true, force: true })
     }
   })
@@ -806,6 +849,7 @@ describe('coding agent Windows process launch', () => {
     const manager = new CodingAgentRunManager()
     const emitted: Array<{ event: string; payload: any }> = []
     ;(manager as any).ensureDbSession = () => {}
+    ;(manager as any).addUserMessage = () => 1
     ;(manager as any).persistTerminalResponse = () => undefined
     ;(manager as any).refreshCodingAgentUsage = async () => {}
     ;(manager as any).completeWorkspaceRunDiff = () => undefined
@@ -1298,7 +1342,7 @@ describe('coding agent Windows process launch', () => {
     ;(manager as any).sessionIndex.clear()
   })
 
-  it('emits a readable failed run when a hidden Claude Code process cannot start', async () => {
+  it('emits an actionable failed run when a hidden Claude Code process is missing', async () => {
     const manager = new CodingAgentRunManager()
     const emitted: Array<{ event: string; payload: any }> = []
     ;(manager as any).ensureDbSession = () => {}
@@ -1332,11 +1376,53 @@ describe('coding agent Windows process launch', () => {
     expect(emitted).toContainEqual(expect.objectContaining({
       event: 'run.failed',
       payload: expect.objectContaining({
-        error: 'spawn claude ENOENT',
+        error: 'Claude Code is not installed or is not available in PATH. Install it in Coding Agent settings, then try again.',
       }),
     }))
 
     const run = (manager as any).runs.get('agent-session-error-1')
+    if (run?.idleTimer) clearTimeout(run.idleTimer)
+    ;(manager as any).runs.clear()
+    ;(manager as any).sessionIndex.clear()
+  })
+
+  it('emits an actionable failed run when Codex is not installed', async () => {
+    const manager = new CodingAgentRunManager()
+    const emitted: Array<{ event: string; payload: any }> = []
+    ;(manager as any).ensureDbSession = () => {}
+    ;(manager as any).addUserMessage = () => {}
+    ;(manager as any).markChatRunCompleted = () => {}
+    ;(manager as any).emitToChat = (_sessionId: string, event: string, payload: any) => {
+      emitted.push({ event, payload })
+    }
+
+    manager.start({
+      agentSessionId: 'agent-session-codex-missing',
+      agentId: 'codex',
+      mode: 'global',
+      profile: 'default',
+      provider: 'global',
+      model: '',
+      sessionId: 'chat-session-codex-missing',
+      command: 'codex',
+      args: [],
+      shellCommand: 'codex',
+      workspaceDir: process.cwd(),
+      state: { messages: [], isWorking: false, events: [], queue: [] },
+    })
+
+    manager.send('chat-session-codex-missing', 'test')
+    testState.spawnCalls[0].child.emit('error', Object.assign(new Error('spawn codex ENOENT'), { code: 'ENOENT' }))
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    expect(emitted).toContainEqual(expect.objectContaining({
+      event: 'run.failed',
+      payload: expect.objectContaining({
+        error: 'Codex is not installed or is not available in PATH. Install it in Coding Agent settings, then try again.',
+      }),
+    }))
+
+    const run = (manager as any).runs.get('agent-session-codex-missing')
     if (run?.idleTimer) clearTimeout(run.idleTimer)
     ;(manager as any).runs.clear()
     ;(manager as any).sessionIndex.clear()

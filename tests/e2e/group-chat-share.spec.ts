@@ -19,9 +19,9 @@ const previewPng = Buffer.from(
   'base64',
 )
 
-async function mockInviteSocket(page: Page, joinFailure: { code: string, error: string } | null = null) {
+async function mockInviteSocket(page: Page, joinFailure: { code: string, error: string } | null = null, workerContent = 'How can I help?', withTools = false, historyCards: unknown[] = []) {
   const joinFailureJson = JSON.stringify(joinFailure)
-  await page.route('**/node_modules/.vite/deps/socket__io-client.js*', async (route) => {
+  await page.route('**/node_modules/.vite/**/socket__io-client.js*', async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/javascript',
@@ -63,7 +63,7 @@ export function io(url, options) {
           roomId: 'room-shared',
           roomName: 'Shared Planning Room',
           members: [{ id: 'member-1', userId: 'guest-1', name: 'Guest', description: '', joinedAt: 1 }],
-          messages: [{
+          messages: [...${JSON.stringify(historyCards)}, {
             id: 'shared-message-1',
             roomId: 'room-shared',
             senderId: 'member-owner',
@@ -71,13 +71,19 @@ export function io(url, options) {
             content: 'Welcome to the shared room',
             timestamp: 1,
             role: 'user',
-          }, {
+          }, ...${JSON.stringify(withTools ? [{
+            id: 'shared-tool-1', roomId: 'room-shared', senderId: 'agent-worker',
+            senderName: 'Worker', role: 'tool', run_id: 'shared-run',
+            content: 'File contents', timestamp: 2, tool_name: 'read_file',
+            tool_call_id: 'read-call',
+          }] : [])}, {
             id: 'shared-message-2',
             roomId: 'room-shared',
             senderId: 'agent-worker',
             senderName: 'Worker',
-            content: 'How can I help?',
-            timestamp: 2,
+            run_id: 'shared-run',
+            content: ${JSON.stringify(workerContent)},
+            timestamp: 3,
             role: 'assistant',
           }],
           agents: [{
@@ -96,9 +102,9 @@ export function io(url, options) {
             invited: 1,
           }],
           rooms: ['room-shared'],
-          total: 2,
+          total: ${withTools ? 3 : 2},
           offset: 0,
-          limit: 2,
+          limit: ${withTools ? 3 : 2},
           hasMore: false,
           typingUsers: [],
           contextStatuses: [],
@@ -107,6 +113,7 @@ export function io(url, options) {
       if (event === 'message' && typeof ack === 'function') ack({ id: payload && payload.id })
       return this
     },
+    __trigger(event, payload) { for (const handler of listeners.get(event) || []) handler(payload) },
     disconnect() {
       this.connected = false
       return this
@@ -180,6 +187,43 @@ async function mockInviteApi(page: Page, valid = true, delayMs = 0) {
 }
 
 test.describe('invite-only group chat share page', () => {
+  test('folds group tool calls with the same summary used in single chat', async ({ page }) => {
+    await mockInviteSocket(page, null, 'Read the project files.', true)
+    await mockInviteApi(page)
+    await page.goto('/#/share/group-chat/ROOM1')
+    await page.locator('#group-chat-guest-name input').fill('Visitor')
+    await page.getByRole('button', { name: 'Enter room' }).click()
+
+    const card = page.locator('.group-agent-run').filter({ has: page.locator('.tool-run-card') })
+    const toggle = card.locator('.tool-run-header')
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    await expect(toggle).toContainText('read_file')
+    await expect(card.locator('.run-tool-list')).toHaveCount(0)
+    await toggle.click()
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    await expect(card.locator('.run-tool-item')).toHaveCount(1)
+    await expect(card.locator('.run-tool-list')).toBeVisible()
+    await card.locator('.tool-line').click()
+    await expect(card.locator('.tool-details')).toContainText('File contents')
+    await toggle.press('Enter')
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    await expect(card.locator('.run-tool-list')).toHaveCount(0)
+    await expect(page.getByText('Read the project files.', { exact: true })).toBeVisible()
+  })
+
+  test('loads an Agent Markdown image through the room invite without filesystem API access', async ({ page }) => {
+    await mockInviteSocket(page, null, 'Here is the image: ![result](/Users/owner/workspace/agent-result.png)')
+    const protectedRequests = await mockInviteApi(page)
+    await page.route('**/api/studio/group-chat/invites/ROOM1/attachments/agent-result.png*', route =>
+      route.fulfill({ status: 200, contentType: 'image/png', body: previewPng }))
+    await page.goto('/#/share/group-chat/ROOM1')
+    await page.locator('#group-chat-guest-name input').fill('Visitor')
+    await page.getByRole('button', { name: 'Enter room' }).click()
+    const picture = page.locator('.markdown-body img[alt="result"]')
+    await expect(picture).toHaveAttribute('src', /\/invites\/ROOM1\/attachments\/agent-result\.png$/)
+    await expect.poll(() => picture.evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)).toBe(true)
+    expect(protectedRequests).toEqual([])
+  })
   test('joins one room without login, app sidebar, room list, or protected API calls', async ({ page }) => {
     await mockInviteSocket(page)
     const protectedRequests = await mockInviteApi(page, true, 300)
@@ -265,4 +309,37 @@ test.describe('invite-only group chat share page', () => {
     await expect(page.locator('#group-chat-guest-name input')).toHaveValue('Worker')
     await expect(page.locator('.group-chat-panel')).toHaveCount(0)
   })
+})
+
+const groupPlan = (revision: number, agent = 'worker') => ({
+  id: `plan-${agent}`, roomId: 'room-shared', senderId: `agent-${agent}`, senderName: agent,
+  role: 'tool', tool_name: 'task_plan', tool_call_id: `plan-${agent}`, run_id: 'shared-run', timestamp: 2,
+  content: JSON.stringify({ session_id: `session-${agent}`, run_id: 'shared-run', plan_id: 'plan', revision,
+    execution_state: revision > 1 ? 'interrupted' : 'running', created_at: 2, updated_at: revision + 2,
+    plan: [{ id: 'a', step: `Inspect ${agent}`, status: revision > 1 ? 'completed' : 'in_progress' },
+      { id: 'b', step: 'Verify results', status: 'pending' }] }),
+})
+
+test('group task cards survive history reload and live stale updates with tool traces hidden', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('hermes_show_tool_calls', 'false'))
+  await mockInviteSocket(page, null, 'Task output', false, [groupPlan(2)])
+  await mockInviteApi(page)
+  await page.goto('/#/share/group-chat/ROOM1')
+  await page.locator('#group-chat-guest-name input').fill('Visitor')
+  await page.getByRole('button', { name: 'Enter room' }).click()
+  const cards = page.getByTestId('task-plan-card')
+  await expect(cards).toHaveCount(1)
+  await expect(cards).toContainText('1/2 completed')
+  await page.evaluate(message => (window as any).__PW_SHARED_GROUP_SOCKET__.socket.__trigger('message', message), groupPlan(1))
+  await expect(cards).toContainText('1/2 completed')
+  await page.evaluate(message => (window as any).__PW_SHARED_GROUP_SOCKET__.socket.__trigger('message', message), groupPlan(1, 'reviewer'))
+  await expect(cards).toHaveCount(2)
+  await expect(page.locator('.group-agent-run').filter({ hasText: 'Task output' }).getByTestId('task-plan-card')).toHaveCount(1)
+  await cards.first().getByRole('button').click()
+  await expect(cards.first().locator('ol')).toHaveCount(0)
+  await page.reload()
+  await page.locator('#group-chat-guest-name input').fill('Visitor')
+  await page.getByRole('button', { name: 'Enter room' }).click()
+  await expect(cards).toHaveCount(1)
+  await expect(cards).toContainText('1/2 completed')
 })

@@ -79,6 +79,7 @@ interface MockHermesApiOptions {
   socialMessageFeishuRecipients?: Record<string, unknown>
   socialMessageTelegramRecipients?: Record<string, unknown>
   socialMessageWeixinRecipients?: Record<string, unknown>
+  ttsActiveProviders?: Partial<Record<'default' | 'research', string>>
 }
 
 export const TEST_MODEL_GROUP = {
@@ -203,6 +204,11 @@ export async function mockHermesApi(page: Page, options: MockHermesApiOptions = 
 
     requests.push(recordRequest(request))
 
+    if (pathname === '/api/studio/announcements') {
+      await route.fulfill(jsonResponse({ ok: true, platform: 'desktop', list: [] }))
+      return
+    }
+
     if (pathname === '/health') {
       await route.fulfill(jsonResponse({ status: 'ok', webui_version: '0.5.23', node_version: '23.0.0' }))
       return
@@ -214,11 +220,12 @@ export async function mockHermesApi(page: Page, options: MockHermesApiOptions = 
         updatedAt: '2026-01-01T00:00:00.000Z',
         agents: [
           { id: 'hermes', name: 'Hermes', provider: 'Nous Research', kind: 'hermes', installed: true, version: '0.19.1', source: 'user-cli', path: '/usr/local/bin/hermes', error: '', installations: [] },
-          { id: 'ekko-agent', name: 'Ekko', provider: 'Hermes Studio', kind: 'built-in', installed: true, version: '0.7.0', source: 'built-in', path: '', error: '', installations: [] },
+          { id: 'ekko-agent', name: 'Ekko', provider: 'Ekko Studio', kind: 'built-in', installed: true, version: '0.7.0', source: 'built-in', path: '', error: '', installations: [] },
           { id: 'claude-code', name: 'Claude', provider: 'Anthropic', kind: 'coding-agent', installed: true, version: '1.0.0', source: 'user-cli', path: '/usr/local/bin/claude', error: '', installations: [] },
           { id: 'codex', name: 'Codex', provider: 'OpenAI', kind: 'coding-agent', installed: true, version: '1.0.0', source: 'user-cli', path: '/usr/local/bin/codex', error: '', installations: [] },
           { id: 'pi', name: 'Pi', provider: 'Pi', kind: 'coding-agent', installed: true, version: '1.0.0', source: 'user-cli', path: '/usr/local/bin/pi', error: '', installations: [] },
           { id: 'grok', name: 'Grok', provider: 'xAI', kind: 'coding-agent', installed: true, version: '1.0.0', source: 'user-cli', path: '/usr/local/bin/grok', error: '', installations: [] },
+          { id: 'dsh', name: 'DeepSeek Harness', provider: 'DeepSeek', kind: 'coding-agent', installed: true, version: '0.1.5-rc.1', source: 'user-cli', path: '/usr/local/bin/dsh', error: '', installations: [] },
         ],
       }))
       return
@@ -235,6 +242,7 @@ export async function mockHermesApi(page: Page, options: MockHermesApiOptions = 
           { id: 'codex', installed: true, source: 'user-cli' },
           { id: 'pi', installed: true, source: 'user-cli' },
           { id: 'grok', installed: true, source: 'user-cli' },
+          { id: 'dsh', installed: true, source: 'user-cli' },
         ],
       }))
       return
@@ -360,6 +368,15 @@ export async function mockHermesApi(page: Page, options: MockHermesApiOptions = 
         return
       }
       await route.fulfill(jsonResponse({ error: 'Method not allowed' }, 405))
+      return
+    }
+
+    if (pathname === '/api/studio/tts/settings' && request.method() === 'GET') {
+      const profile = request.headers()['x-hermes-profile'] === 'research' ? 'research' : 'default'
+      await route.fulfill(jsonResponse({
+        settings: [],
+        activeProvider: options.ttsActiveProviders?.[profile] || 'edge',
+      }))
       return
     }
 
@@ -863,13 +880,14 @@ export async function mockHermesApi(page: Page, options: MockHermesApiOptions = 
     if (pathname === '/api/studio/versions' && request.method() === 'GET') {
       await route.fulfill(jsonResponse({
         schema: 1,
+        accessMode: 'public_beta',
         hermes: [],
         mobile: {
           version: '1.0.0',
           channels: {
-            androidApk: { githubUrl: '', cloudflareUrl: '', online: false },
-            googlePlay: { url: '', online: false },
-            apple: { testFlightUrl: '', appStoreUrl: '', online: false },
+            androidApk: { version: '1.0.0', githubUrl: '', cloudflareUrl: '', online: false },
+            googlePlay: { version: '1.0.1', url: '', online: false },
+            apple: { version: '1.1.0', testFlightUrl: '', appStoreUrl: '', online: false },
             harmony: { url: '', online: false },
           },
         },
@@ -894,6 +912,18 @@ export async function mockHermesApi(page: Page, options: MockHermesApiOptions = 
       return
     }
 
+    if (pathname === '/api/coding-agents/update-policies' && request.method() === 'GET') {
+      await route.fulfill({ json: { agents: {} } })
+      return
+    }
+
+    if (pathname === '/api/coding-agents/dsh/session-presets' && request.method() === 'GET') {
+      await route.fulfill(jsonResponse({ presets: [
+        { id: 'standard', name: 'Standard mode', description: 'File editing and delegation.', isDefault: true },
+        { id: 'minimal', name: 'Minimal mode', description: 'A minimal set of tools.', isDefault: false },
+      ] }))
+      return
+    }
     if (pathname === '/api/coding-agents' && request.method() === 'GET') {
       await route.fulfill(jsonResponse({ tools: [] }))
       return
@@ -955,18 +985,24 @@ export async function authenticate(page: Page, accessKey = TEST_ACCESS_KEY, prof
 }
 
 export async function mockChatSocket(page: Page) {
-  await page.route('**/node_modules/.vite/deps/socket__io-client.js*', async (route) => {
+  await page.route('**/node_modules/.vite/**/socket__io-client.js*', async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/javascript',
       body: `
 const state = window.__PW_CHAT_SOCKET__ || (window.__PW_CHAT_SOCKET__ = { sockets: [], emitted: [] })
+state.broadcast = (event, payload) => {
+  for (const socket of [...state.sockets]) {
+    if (socket.connected && socket.rooms.has(payload.session_id)) socket.__trigger(event, payload)
+  }
+}
 function makeSocket(url, options) {
   const listeners = new Map()
   const onceListeners = new Map()
   const socketNumber = (state.socketCount = (state.socketCount || 0) + 1)
   const socket = {
     id: 'pw-socket-' + socketNumber,
+    rooms: new Set(),
     connected: true,
     url,
     options,
@@ -998,6 +1034,7 @@ function makeSocket(url, options) {
     },
     emit(event, payload, ack) {
       state.emitted.push({ event, payload })
+      if ((event === 'run' || event === 'resume') && payload?.session_id) this.rooms.add(payload.session_id)
       if (typeof ack === 'function' && String(url).endsWith('/workflow')) {
         const data = event === 'workflow.status.subscribe'
           ? { statuses: [] }

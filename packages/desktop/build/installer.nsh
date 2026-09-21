@@ -65,7 +65,7 @@
     FileWrite $0 "    if ($$exe -and $$exe -ieq $$target) { return $$true }$\r$\n"
     FileWrite $0 "    if ($$cmd -and $$cmd.IndexOf($$installDir, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) { return $$true }$\r$\n"
     FileWrite $0 "    foreach ($$root in $$runtimeRoots) {$\r$\n"
-    FileWrite $0 "      if ((Test-UnderPath $$exe $$root) -and ($$cmd -match 'hermes-studio-mcp|hermes_bridge\.py|hermes_cli\.main gateway run')) { return $$true }$\r$\n"
+    FileWrite $0 "      if ((Test-UnderPath $$exe $$root) -and ($$cmd -match '(?:ekko|hermes)-studio-mcp|hermes_bridge\.py|hermes_cli\.main gateway run')) { return $$true }$\r$\n"
     FileWrite $0 "    }$\r$\n"
     FileWrite $0 "    return $$false$\r$\n"
     FileWrite $0 "  }$\r$\n"

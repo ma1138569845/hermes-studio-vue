@@ -11,21 +11,27 @@ import { setupGlobalEkkoAgent } from './manager'
 
 const MANAGED_ENV_KEY = 'HERMES_WEB_UI_MANAGED_MCP'
 const MANAGED_SERVERS: ReadonlyArray<{ name: string; toolset: string }> = [
-  { name: 'hermes-studio-api', toolset: 'api' },
-  { name: 'hermes-studio-browser', toolset: 'browser' },
-  { name: 'hermes-studio-devices', toolset: 'devices' },
-  { name: 'hermes-studio-use', toolset: 'use' },
+  { name: 'ekko-studio-api', toolset: 'api' },
+  { name: 'ekko-studio-browser', toolset: 'browser' },
+  { name: 'ekko-studio-devices', toolset: 'devices' },
+  { name: 'ekko-studio-use', toolset: 'use' },
 ]
 const MANAGED_SERVER_NAMES = new Set(MANAGED_SERVERS.map(server => server.name))
 const LEGACY_MANAGED_SERVER_NAMES = new Set([
-  'hermes-studio',
+  'hermes-studio-api',
+  'hermes-studio-browser',
+  'hermes-studio-devices',
+  'hermes-studio-use',
   'hermes-studio-mcp',
+  'hermes-studio',
+  'ekko-studio-mcp',
   'hermes-web-ui-mcp',
 ])
 const LEGACY_MANAGED_COMMANDS = new Set([
   'hermes-lan-peer-mcp',
   'hermes-devices-mcp',
   'hermes-web-ui-mcp',
+  'ekko-studio-mcp',
   'hermes-studio-mcp',
 ])
 const MCP_SERVER_NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/
@@ -85,9 +91,9 @@ function shouldInjectManagedMcpServers(): boolean {
 function candidateBundledMcpScripts(): string[] {
   return [
     process.env.HERMES_WEB_UI_MCP_BIN,
-    join(process.cwd(), 'bin/hermes-studio-mcp.mjs'),
-    join(__dirname, '../../../bin/hermes-studio-mcp.mjs'),
-    join(__dirname, '../../../../../../bin/hermes-studio-mcp.mjs'),
+    join(process.cwd(), 'bin/ekko-studio-mcp.mjs'),
+    join(__dirname, '../../../bin/ekko-studio-mcp.mjs'),
+    join(__dirname, '../../../../../../bin/ekko-studio-mcp.mjs'),
     join(process.cwd(), 'bin/hermes-web-ui-mcp.mjs'),
     join(__dirname, '../../../bin/hermes-web-ui-mcp.mjs'),
     join(__dirname, '../../../../../../bin/hermes-web-ui-mcp.mjs'),
@@ -107,8 +113,8 @@ function managedCommandConfig(toolset: string): Pick<EkkoMcpServerConfig, 'comma
   if (bundledScript) {
     return { command: runtimeNodePath() || process.execPath, args: [bundledScript, toolset] }
   }
-  if (isDesktopRuntime()) return { command: 'hermes-studio-mcp', args: [toolset] }
-  return { command: 'hermes-studio-mcp', args: [toolset] }
+  if (isDesktopRuntime()) return { command: 'ekko-studio-mcp', args: [toolset] }
+  return { command: 'ekko-studio-mcp', args: [toolset] }
 }
 
 function managedMcpServerConfig(
@@ -119,12 +125,14 @@ function managedMcpServerConfig(
   return {
     ...managedCommandConfig(toolset),
     env: {
+      ELECTRON_RUN_AS_NODE: '1',
       HERMES_WEB_UI_URL: `http://127.0.0.1:${config.port}`,
       HERMES_WEB_UI_HOME: config.appHome,
       HERMES_WEBUI_STATE_DIR: config.appHome,
       HERMES_WEB_UI_PROFILE: profile,
       HERMES_MCP_SERVER_NAME: serverName,
       HERMES_MCP_TOOLSET: toolset,
+      HERMES_MCP_NATIVE_TASK_PLAN: '1',
       [MANAGED_ENV_KEY]: '1',
     },
     enabled: true,
@@ -172,7 +180,7 @@ export function injectManagedEkkoMcpServers(
       result.targets.push({
         profile,
         status: 'skipped',
-        reason: `existing ${unmanagedCollision.name} MCP server is not managed by Hermes Studio`,
+        reason: `existing ${unmanagedCollision.name} MCP server is not managed by Ekko Studio`,
       })
       continue
     }
@@ -180,6 +188,16 @@ export function injectManagedEkkoMcpServers(
     let profileChanged = false
     let injected = false
     let hadManagedExisting = false
+    for (const { name } of MANAGED_SERVERS) {
+      const legacyName = name.replace(/^ekko-/, 'hermes-')
+      const legacy = servers[legacyName]
+      if (!servers[name] && isManagedServerConfig(legacy)) {
+        servers[name] = legacy
+        delete servers[legacyName]
+        profileChanged = true
+      }
+    }
+
     for (const [name, server] of Object.entries(servers)) {
       if (MANAGED_SERVER_NAMES.has(name)) continue
       if (!LEGACY_MANAGED_SERVER_NAMES.has(name) && !isManagedServerConfig(server)) continue
@@ -366,15 +384,28 @@ function validateMcpServerName(name: string): string {
   return normalized
 }
 
+function normalizeMcpServerType(value: unknown): '' | 'stdio' | 'streamable_http' {
+  if (typeof value !== 'string') return ''
+  const normalized = value.trim().toLowerCase()
+  if (!normalized) return ''
+  if (normalized === 'stdio') return 'stdio'
+  if (
+    normalized === 'http'
+    || normalized === 'streamable_http'
+    || normalized === 'streamable-http'
+    || normalized === 'streamablehttp'
+  ) {
+    return 'streamable_http'
+  }
+  throw new Error('MCP server type must be stdio or streamable_http.')
+}
+
 function normalizeEkkoMcpServerConfig(value: unknown): EkkoMcpServerConfig {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('MCP server config must be an object.')
   const candidate = value as Record<string, unknown>
   const command = typeof candidate.command === 'string' ? candidate.command.trim() : ''
   const url = typeof candidate.url === 'string' ? candidate.url.trim() : ''
-  const configuredType = typeof candidate.type === 'string' ? candidate.type.trim().toLowerCase() : ''
-  if (configuredType && configuredType !== 'stdio' && configuredType !== 'streamable_http') {
-    throw new Error('MCP server type must be stdio or streamable_http.')
-  }
+  const configuredType = normalizeMcpServerType(candidate.type)
   const type = configuredType || (url && !command ? 'streamable_http' : 'stdio')
   if (type === 'stdio' && !command) throw new Error('MCP server command is required for stdio.')
   if (type === 'streamable_http' && !url) throw new Error('MCP server url is required for streamable_http.')

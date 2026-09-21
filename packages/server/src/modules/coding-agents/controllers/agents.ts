@@ -1,9 +1,8 @@
+import { getAgentUpdateManager, checkAgentUpdateAndPublish, installAgentAndPublish } from '../services/update-manager'
 import type { Context } from 'koa'
 import {
-  checkUpdateAgent,
   deleteCodingAgent,
   getCodingAgentsStatus,
-  installCodingAgent,
   openCodingAgentNativeTerminal,
   prepareCodingAgentLaunch,
   readCodingAgentConfigFile,
@@ -13,6 +12,12 @@ import {
   writeCodingAgentConfigFile,
   type CodingAgentConfigScope,
 } from '../services'
+import {
+  listCodingAgentMcpServers,
+  removeCodingAgentMcpServer,
+  testCodingAgentMcpServer,
+  upsertCodingAgentMcpServer,
+} from '../services/mcp-manager'
 
 function configScope(ctx: Context): CodingAgentConfigScope {
   const body = ctx.request.body as { profile?: unknown; provider?: unknown } | undefined
@@ -33,7 +38,7 @@ export async function status(ctx: Context) {
 
 export async function install(ctx: Context) {
   try {
-    const result = await installCodingAgent(ctx.params.id)
+    const result = await installAgentAndPublish(ctx.params.id)
     ctx.body = result
   } catch (err: any) {
     ctx.status = err.status || 500
@@ -43,7 +48,7 @@ export async function install(ctx: Context) {
 
 export async function checkUpdate(ctx: Context) {
   try {
-    ctx.body = await checkUpdateAgent(ctx.params.id)
+    ctx.body = await checkAgentUpdateAndPublish(ctx.params.id)
   } catch (err: any) {
     ctx.status = err.status || 500
     ctx.body = { error: err.message || 'Failed to check coding agent update' }
@@ -76,6 +81,63 @@ export async function writeConfigFile(ctx: Context) {
   } catch (err: any) {
     ctx.status = err.status || 500
     ctx.body = { error: err.message || 'Failed to write coding agent config file' }
+  }
+}
+
+export async function listMcpServers(ctx: Context) {
+  try {
+    ctx.body = await listCodingAgentMcpServers(ctx.params.id, configScope(ctx))
+  } catch (err: any) {
+    ctx.status = err.status || 500
+    ctx.body = { error: err.message || 'Failed to list coding agent MCP servers' }
+  }
+}
+
+export async function addMcpServer(ctx: Context) {
+  try {
+    const body = (ctx.request.body || {}) as { name?: unknown; config?: unknown }
+    ctx.body = await upsertCodingAgentMcpServer(
+      ctx.params.id,
+      typeof body.name === 'string' ? body.name : '',
+      body.config as Record<string, any>,
+      configScope(ctx),
+    )
+  } catch (err: any) {
+    ctx.status = err.status || 500
+    ctx.body = { error: err.message || 'Failed to add coding agent MCP server' }
+  }
+}
+
+export async function updateMcpServer(ctx: Context) {
+  try {
+    const body = (ctx.request.body || {}) as { config?: unknown }
+    ctx.body = await upsertCodingAgentMcpServer(
+      ctx.params.id,
+      ctx.params.name,
+      body.config as Record<string, any>,
+      configScope(ctx),
+    )
+  } catch (err: any) {
+    ctx.status = err.status || 500
+    ctx.body = { error: err.message || 'Failed to update coding agent MCP server' }
+  }
+}
+
+export async function removeMcpServer(ctx: Context) {
+  try {
+    ctx.body = await removeCodingAgentMcpServer(ctx.params.id, ctx.params.name, configScope(ctx))
+  } catch (err: any) {
+    ctx.status = err.status || 500
+    ctx.body = { error: err.message || 'Failed to remove coding agent MCP server' }
+  }
+}
+
+export async function testMcpServer(ctx: Context) {
+  try {
+    ctx.body = await testCodingAgentMcpServer(ctx.params.id, ctx.params.name, configScope(ctx))
+  } catch (err: any) {
+    ctx.status = err.status || 503
+    ctx.body = { error: err.message || 'Failed to test coding agent MCP server' }
   }
 }
 
@@ -135,6 +197,7 @@ export async function startRun(ctx: Context) {
   try {
     const body = ctx.request.body as {
       sessionId?: string
+      agentPreset?: string
       mode?: any
       profile?: string
       provider?: string
@@ -145,6 +208,7 @@ export async function startRun(ctx: Context) {
     }
     ctx.body = await startCodingAgentRun(ctx.params.id, {
       sessionId: String(body.sessionId || ''),
+      agentPreset: body.agentPreset,
       mode: body.mode,
       profile: ctx.state.profile?.name || body.profile,
       provider: body.provider,
@@ -176,4 +240,15 @@ export async function stopRun(ctx: Context) {
     ctx.status = err.status || 500
     ctx.body = { error: err.message || 'Failed to stop coding agent run' }
   }
+}
+
+export async function updatePolicies(ctx: Context) {
+  ctx.body = { agents: (await getAgentUpdateManager()).snapshot() }
+}
+export async function setUpdatePolicy(ctx: Context) {
+  try {
+    const manager = await getAgentUpdateManager()
+    await manager.set(ctx.params.id, (ctx.request.body as any)?.autoUpdate)
+    ctx.body = { agents: manager.snapshot() }
+  } catch (error) { ctx.status=400;ctx.body={error:error instanceof Error?error.message:'Invalid policy'} }
 }

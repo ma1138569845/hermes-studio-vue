@@ -3,7 +3,7 @@ import { accessSync, constants, createReadStream, createWriteStream, existsSync,
 import { get as httpGet } from 'http'
 import { get as httpsGet } from 'https'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'path'
-import * as tar from 'tar'
+import { extractTarGzipArchive } from './runtime-archive'
 import { config } from '../../../studio/public/config'
 import { getHermesAgentVersion, getHermesWebUiVersion } from '../../../studio/public/system-info'
 import { updateAgentStatus } from '../../../studio/public/agent-status-registry'
@@ -12,8 +12,8 @@ import { detectHermesHome } from './path'
 import { cleanupRuntimePath, removeRuntimePath, renameRuntimePath } from './runtime-filesystem'
 
 const ACTIVE_VERSION_FILE = 'active-version.json'
-const DEFAULT_REMOTE_MANIFEST_URL = 'https://api.hermes-studio.ai/api/studio/versions'
-const FALLBACK_REMOTE_MANIFEST_URL = 'https://hermes-studio.ai/versions.json'
+const DEFAULT_REMOTE_MANIFEST_URL = 'https://api.ekkostudio.xyz/api/studio/versions'
+const FALLBACK_REMOTE_MANIFEST_URL = 'https://ekkostudio.xyz/versions.json'
 const DEFAULT_DOWNLOAD_BASE_URL = 'https://download.ekkolearnai.com'
 const DEFAULT_GITHUB_REPO = 'EKKOLearnAI/hermes-studio'
 
@@ -636,15 +636,6 @@ async function sha256File(file: string): Promise<string> {
   return hash.digest('hex')
 }
 
-async function extractTarGzip(archive: string, targetRoot: string): Promise<void> {
-  await tar.x({
-    file: archive,
-    cwd: targetRoot,
-    preserveOwner: false,
-    unlink: true,
-  })
-}
-
 export async function downloadRuntimeVersion(version: string, source: VersionDownloadSource, onProgress?: DownloadProgressHandler): Promise<InstalledRuntimeVersion> {
   const cleanVersion = version.trim()
   if (!cleanVersion) throw new Error('Runtime version is required')
@@ -669,23 +660,32 @@ export async function downloadRuntimeVersion(version: string, source: VersionDow
   removeRuntimePath(tempRoot)
   mkdirSync(tempRoot, { recursive: true })
 
+  let archiveVerified = false
+  let installSucceeded = false
   try {
-    await downloadFile(assetUrl, archive, onProgress)
-    onProgress?.({ stage: 'verify', message: 'runtimeVersions.jobStage.verifyRuntime', percent: 100 })
-    if (asset.sha256) {
-      const actual = await sha256File(archive)
-      if (actual !== asset.sha256) throw new Error(`Runtime checksum mismatch for ${assetName}`)
+    if (asset.sha256 && existsSync(archive) && await sha256File(archive) === asset.sha256) {
+      archiveVerified = true
+      onProgress?.({ stage: 'verify', message: 'runtimeVersions.jobStage.verifyRuntime', percent: 100 })
+    } else {
+      await downloadFile(assetUrl, archive, onProgress)
+      onProgress?.({ stage: 'verify', message: 'runtimeVersions.jobStage.verifyRuntime', percent: 100 })
+      if (asset.sha256) {
+        const actual = await sha256File(archive)
+        if (actual !== asset.sha256) throw new Error(`Runtime checksum mismatch for ${assetName}`)
+      }
+      archiveVerified = true
     }
     onProgress?.({ stage: 'extract', message: 'runtimeVersions.jobStage.extractRuntime' })
-    await extractTarGzip(archive, tempRoot)
+    await extractTarGzipArchive(archive, tempRoot)
     validateRuntimeDirectory(tempRoot, platform)
     validateRuntimeAgentFiles(tempRoot)
     onProgress?.({ stage: 'install', message: 'runtimeVersions.jobStage.installRuntime' })
     removeRuntimePath(targetRoot)
     mkdirSync(dirname(targetRoot), { recursive: true })
     await renameRuntimePath(tempRoot, targetRoot)
+    installSucceeded = true
   } finally {
-    cleanupRuntimePath(archive)
+    if (!archiveVerified || installSucceeded) cleanupRuntimePath(archive)
     cleanupRuntimePath(tempRoot)
   }
 
@@ -726,7 +726,7 @@ export async function downloadWebUiVersion(version: string, source: VersionDownl
       if (actual !== manifest.asset.sha256) throw new Error(`Web UI checksum mismatch for ${assetName}`)
     }
     onProgress?.({ stage: 'extract', message: 'runtimeVersions.jobStage.extractWebUi' })
-    await extractTarGzip(archive, tempRoot)
+    await extractTarGzipArchive(archive, tempRoot)
     const extractedRoot = join(tempRoot, 'webui')
     for (const required of ['package.json', 'bin/hermes-web-ui.mjs', 'dist/server/index.js']) {
       if (!existsSync(join(extractedRoot, required))) throw new Error(`Web UI archive is missing required file: ${required}`)

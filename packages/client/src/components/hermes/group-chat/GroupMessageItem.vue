@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import TaskPlanCard from '../chat/TaskPlanCard.vue'
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useMessage } from 'naive-ui'
@@ -33,6 +34,7 @@ import { isServerTtsProvider } from '@/api/studio/tts'
 import { groupAgentAvatar, groupMessageAgent, parseStoredAvatar } from '@/utils/group-agent-avatar'
 import GroupAgentMessageAvatar from './GroupAgentMessageAvatar.vue'
 import GroupAgentRobotIcon from './GroupAgentRobotIcon.vue'
+import ImagePreviewOverlay from '@/components/hermes/chat/ImagePreviewOverlay.vue'
 
 const MarkdownRenderer = defineAsyncComponent(async () => (await import('../chat/MarkdownRenderer.vue')).default)
 
@@ -154,6 +156,12 @@ const thinkingExpanded = computed(() => {
     return false
 })
 const assistantBody = computed(() => parsedThinking.value.body || props.message.content || '')
+function resolveGroupImageUrl(path: string): string {
+    return getGroupChatAttachmentUrl({
+        roomId: props.message.roomId || groupChatStore.currentRoomId || '',
+        inviteCode: groupChatStore.inviteGuest ? groupChatStore.activeInviteCode || undefined : undefined,
+    }, path)
+}
 const contentBlocks = computed(() => {
     const content = props.message.content || ''
     const trimmed = content.trim()
@@ -542,6 +550,7 @@ function playSpeech(content: string, autoplay = false, profileOverride = '') {
             model: voiceSettings.doubaoModel.value,
             voice: voiceSettings.doubaoVoice.value,
             stylePrompt: voiceSettings.doubaoStylePrompt.value || undefined,
+            speed: voiceSettings.doubaoSpeed.value || undefined,
         }
         if (autoplay) void speech.openaiPlay(props.message.id, content, options).catch(handleAutoplayTtsError)
         else speech.openaiToggle(props.message.id, content, options)
@@ -673,7 +682,8 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-    <div v-if="isToolMessage" class="group-message tool-message" :class="{ embedded }">
+    <TaskPlanCard v-if="message.taskPlan" :plan="message.taskPlan" />
+    <div v-else-if="isToolMessage" class="group-message tool-message" :class="{ embedded }">
         <div class="msg-body">
             <div v-if="!embedded" class="msg-header">
                 <GroupAgentMessageAvatar
@@ -814,10 +824,10 @@ onBeforeUnmount(() => {
                     </div>
                 </div>
                 <template v-if="parsedMessageReference">
-                    <MarkdownRenderer :content="referencedContentMarkdown" :mention-names="mentionNames" />
-                    <MarkdownRenderer v-if="parsedMessageReference.reply" :content="parsedMessageReference.reply" :mention-names="mentionNames" />
+                    <MarkdownRenderer :content="referencedContentMarkdown" :mention-names="mentionNames" :resolve-image-url="resolveGroupImageUrl" />
+                    <MarkdownRenderer v-if="parsedMessageReference.reply" :content="parsedMessageReference.reply" :mention-names="mentionNames" :resolve-image-url="resolveGroupImageUrl" />
                 </template>
-                <MarkdownRenderer v-else-if="renderedDisplayBody" :content="renderedDisplayBody" :mention-names="mentionNames" />
+                <MarkdownRenderer v-else-if="renderedDisplayBody" :content="renderedDisplayBody" :mention-names="mentionNames" :resolve-image-url="resolveGroupImageUrl" :defer-images="!!message.isStreaming" />
                 <ToolChangeCard
                     v-for="change in assistantWorkspaceChanges"
                     :key="change.change_id"
@@ -876,9 +886,12 @@ onBeforeUnmount(() => {
             </div>
         </div>
     </div>
-    <div v-if="previewUrl" class="image-preview-overlay" @click.self="previewUrl = null">
-        <img :src="previewUrl" class="image-preview-img" @click="previewUrl = null" />
-    </div>
+    <ImagePreviewOverlay
+        v-if="previewUrl"
+        :src="previewUrl"
+        alt=""
+        @close="previewUrl = null"
+    />
 </template>
 
 <style scoped lang="scss">
@@ -1401,26 +1414,6 @@ onBeforeUnmount(() => {
     }
 }
 
-.image-preview-overlay {
-    position: fixed;
-    inset: 0;
-    z-index: 9999;
-    background: rgba(0, 0, 0, 0.82);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 24px;
-}
-
-.image-preview-img {
-    max-width: min(96vw, 1400px);
-    max-height: 92vh;
-    object-fit: contain;
-    border-radius: 6px;
-    cursor: zoom-out;
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
-}
-
 .thinking-block {
     margin-bottom: 8px;
     padding: 4px 0;
@@ -1507,6 +1500,20 @@ onBeforeUnmount(() => {
     40% {
         opacity: 1;
         transform: scale(1);
+    }
+}
+@media (max-width: $breakpoint-mobile) {
+    .group-message .msg-body {
+        min-width: 0;
+        max-width: 100%;
+    }
+
+    .group-message.embedded {
+        .msg-content,
+        &.agent .msg-content.agent-content,
+        &.self .msg-content {
+            padding: 10px 14px;
+        }
     }
 }
 </style>

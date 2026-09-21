@@ -70,6 +70,29 @@ PORT=6060
 - The auth token is auto-generated on first run and printed to container logs.
 - Deleting the token file and restarting will generate a new one.
 
+### Coding agent installations
+
+Coding agents installed from Studio (Claude Code, Codex, Pi, OpenCode, and Grok)
+use npm's global prefix at `/home/agent/.hermes-web-ui/coding-agent/npm`.
+The image and Compose put its `bin` directory on `PATH`. With the default
+mounts, packages and executable links are saved under
+`${HERMES_DATA_DIR}/hermes-web-ui/coding-agent/npm` and remain available after
+container recreation or image updates. Studio's Pi MCP adapter and scoped
+agent configurations also use the existing Studio data volume.
+
+Older images installed these CLIs outside the data volume. After upgrading,
+reinstall affected agents once from Studio to place them in the persistent
+directory. Packages already lost when an old container was removed cannot be
+recovered from the new image. A restart of the same container normally retains
+its writable filesystem; recreation replaces it.
+
+For custom deployments, persist `/home/agent/.hermes-web-ui`, or set
+`NPM_CONFIG_PREFIX` to a directory inside your own persistent mount and include
+`$NPM_CONFIG_PREFIX/bin` on `PATH`. Do not mount over `/usr/local`, which also
+contains the image's Node.js runtime. Native CLI login/configuration directories
+under `/home/agent` are separate from the npm installation; mount those as well
+if you use native global logins and need to retain them across recreation.
+
 ## Port Mapping
 
 | Port | Description |
@@ -84,6 +107,35 @@ No Hermes gateway ports are exposed by this compose setup.
 - If `HERMES_BIN` is not provided, code falls back to `hermes` in `PATH`.
 - Profile-specific chat runs are handled through the Hermes agent bridge. The selected/requested profile is authorized per account and passed with runtime requests; switching the frontend Hermes Profile does not restart the bridge or clear other running tasks.
 - Docker is a managed gateway runtime: Web UI checks profile gateways on startup, but it does not run a periodic gateway recovery loop.
+
+### Optional Hermes startup patches
+
+The image starts through `/app/bin/start-studio-all.sh`. It does not apply
+Hermes Agent source patches by default. If a deployment has a compatible,
+optional patch script, enable it explicitly with
+`HERMES_PATCH_SCRIPT=/path/to/patch.sh`. A missing or failing optional patch is logged and the Web UI still
+starts, so a patch written for an older Hermes Agent layout cannot put the
+container into a restart loop.
+
+For Compose, mount the deployment-owned script and set `HERMES_PATCH_SCRIPT`
+in `.env`; the Compose file passes that variable through without enabling a
+patch by default.
+
+For example, keep the script outside the image and add an override file:
+
+```yaml
+services:
+  hermes-webui:
+    volumes:
+      - ./hermes_patches:/opt/data:ro
+    environment:
+      HERMES_PATCH_SCRIPT: /opt/data/apply-hermes-patches.sh
+```
+
+Patch scripts are deployment-owned and must be kept compatible with the
+installed Hermes Agent version. An entrypoint override that calls a custom
+patch script directly is outside the image's startup contract; use the image
+entrypoint and `HERMES_PATCH_SCRIPT` when the patch is optional.
 
 ## Common Operations
 

@@ -1,3 +1,7 @@
+import { studioMcpUsageGuidelines } from '../../public/runs/prompt'
+import { studioMcpCapabilities } from '../../public/runs/mcp-capabilities'
+import { saveTaskPlan } from '../../repositories/task-plan-store'
+import type { TaskPlanSnapshot } from '../../contracts/task-plan'
 import type { Server, Socket } from 'socket.io'
 import { createHash, randomUUID } from 'crypto'
 import {
@@ -47,6 +51,7 @@ import { buildOutboundRunEvent } from './resume-payload'
 import { estimateUsageTokensFromMessages } from './usage'
 import type { BackgroundContinuationContext, ChatCodingAgentId, ContentBlock, QueuedRun, SessionState } from './types'
 import { completeWorkspaceRunCheckpoint, startWorkspaceRunCheckpoint } from './workspace-diff-tracker'
+import { selectWorkspace } from '../workspace/manager'
 
 export interface EkkoAgentRunSocketData {
   input: string | ContentBlock[]
@@ -98,6 +103,7 @@ export interface EkkoAgentRunSocketData {
   api_key?: string
   apiMode?: string
   api_mode?: string
+  resolved_mcp_servers?: Record<string, unknown>
   mcpServers?: Record<string, unknown>
   mcp_servers?: Record<string, unknown>
   peerExcludeSocketId?: string
@@ -474,7 +480,11 @@ export async function handleEkkoAgentRun(
   const persistedReasoningEffort = normalizeReasoningEffort(data.reasoning_effort ?? storedSession?.reasoning_effort)
   const reasoningEffort = resolveReasoningEffort(persistedReasoningEffort)
   const agent = getGlobalEkkoAgent(profile)
-  const workspace = data.workspace || storedSession?.workspace || agent.sessionWorkspaceDirectory(sessionId)
+  const workspace = selectWorkspace(
+    data.workspace,
+    storedSession?.workspace,
+    () => agent.sessionWorkspaceDirectory(sessionId),
+  )
   const shouldEmitWorkspaceUpdate = Boolean(workspace && !storedSession?.workspace)
   if (storedSession && !storedSession.workspace) updateSession(sessionId, { workspace })
   const displayInput = data.display_input === undefined ? data.input : data.display_input
@@ -483,7 +493,11 @@ export async function handleEkkoAgentRun(
   const storageText = data.storage_message !== undefined ? data.storage_message : displayText
   const shouldPersistUserMessage = !skipUserMessage && displayInput !== null
   const now = Math.floor(Date.now() / 1000)
-  const instructions = String(data.instructions || '').trim()
+  const mcpServers = data.resolved_mcp_servers ?? resolveEkkoMcpServers(profile, data.mcpServers || data.mcp_servers)
+  const instructions = [
+    String(data.instructions || '').trim(),
+    studioMcpUsageGuidelines(studioMcpCapabilities(mcpServers)),
+  ].filter(Boolean).join('\n\n')
   const instructionMessages: AgentMessage[] = instructions
     ? [{ role: 'system', content: instructions }]
     : []
@@ -613,7 +627,6 @@ export async function handleEkkoAgentRun(
     model: modelConfig.model,
     accessToken: apiKey,
   })
-  const mcpServers = resolveEkkoMcpServers(profile, data.mcpServers || data.mcp_servers)
   const modelClient = createProviderModelClient(createModelClient(providerConfig, { fetch: authorizedProviderFetch }), {
     providerConfig,
     fallback: fallbackProviderConfig
@@ -629,6 +642,17 @@ export async function handleEkkoAgentRun(
     { role: 'user', content: inputText },
   ]).inputTokens
 
+  const toTaskPlanSnapshot = (plan: any): TaskPlanSnapshot => ({
+    session_id: sessionId,
+    run_id: plan.runId,
+    plan_id: plan.planId,
+    revision: plan.revision,
+    execution_state: plan.executionState,
+    explanation: plan.explanation,
+    plan: plan.plan,
+    created_at: plan.createdAt,
+    updated_at: plan.updatedAt,
+  })
   let assistantText = ''
   let assistantReasoning = ''
   let assistantMessageId: string | null = null
@@ -949,6 +973,8 @@ export async function handleEkkoAgentRun(
           delta: event.text,
         })
       }
+    } else if (event.type === 'plan.updated') {
+      emit('plan.updated', { event: 'plan.updated', ...toTaskPlanSnapshot(event.plan) })
     } else if (event.type === 'tool.started') {
       emit('tool.started', {
         event: 'tool.started',
@@ -971,6 +997,14 @@ export async function handleEkkoAgentRun(
         tool_call_id: event.toolCallId,
         duration: Math.round(event.durationMs / 10) / 100,
         error: event.result.error,
+      })
+    } else if (event.type === 'run.tool_recovery_required') {
+      emit(event.type, {
+        event: event.type,
+        run_id: event.runId,
+        tool: event.toolName,
+        name: event.toolName,
+        failures: event.failures,
       })
     } else if (
       event.type === 'subagent.start' ||
@@ -1374,6 +1408,7 @@ export async function handleEkkoAgentRun(
         sessionId,
         turnId,
       },
+      onPlanUpdate: (plan: any) => saveTaskPlan(toTaskPlanSnapshot(plan)),
       onEvent: handleRuntimeEvent,
       onSkillReviewUsage: (event: any) => {
         recordSessionUsage({

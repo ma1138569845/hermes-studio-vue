@@ -1,14 +1,15 @@
 {
   "name": "hermes-studio",
   "version": "0.7.16",
-  "description": "DechnicAuditor desktop distribution with bundled Python runtime and hermes-agent",  "homepage": "https://hermes-studio.ai",
+  "description": "DechnicAuditor desktop distribution with bundled Python runtime and hermes-agent",
+  "homepage": "https://hermes-studio.ai",
   "author": {
     "name": "DechnicAuditor Contributors",
     "email": "noreply@hermes-studio.local"
   },
   "license": "BSL-1.1",
   "private": true,
-  "main": "dist/main/index.js",
+  "main": "dist/main/entry.js",
   "scripts": {
     "build:main": "tsc -p tsconfig.json",
     "build": "npm run build:main",

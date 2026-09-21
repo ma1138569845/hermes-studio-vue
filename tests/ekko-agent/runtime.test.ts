@@ -10,11 +10,13 @@ import {
   DelegateTaskTool,
   DEFAULT_AGENT_MAX_STEPS,
   DEFAULT_AGENT_MODEL_MAX_RETRIES,
+  DEFAULT_TOOL_RESULT_MAX_TEXT_BYTES,
   ModelProviderError,
   ViewImageTool,
   buildSystemPrompt,
 } from '../../packages/ekko-agent/src/index'
 import type {
+  AgentRuntimeEvent,
   AgentTool,
   AgentToolProvider,
   ModelEvent,
@@ -415,7 +417,7 @@ describe('ekko-agent runtime', () => {
     tools.register(echoTool)
     const client = modelClient((_request, call) => call === 1
       ? {
-          content: '',
+          content: '继续检查:',
           toolCalls: [{ id: 'call_1', name: 'echo', arguments: { text: 'from-tool' } }],
           finishReason: 'tool_calls',
         }
@@ -428,7 +430,7 @@ describe('ekko-agent runtime', () => {
     expect(result.messages).toMatchObject([
       { role: 'system' },
       { role: 'user', content: 'use echo' },
-      { role: 'assistant', toolCalls: [{ id: 'call_1', name: 'echo' }] },
+      { role: 'assistant', content: '继续检查。', toolCalls: [{ id: 'call_1', name: 'echo' }] },
       { role: 'tool', toolCallId: 'call_1', name: 'echo', content: 'from-tool' },
       { role: 'assistant', content: 'tool said from-tool' },
     ])
@@ -562,7 +564,7 @@ describe('ekko-agent runtime', () => {
       .toEqual(toolCalls.map(toolCall => toolCall.id))
   })
 
-  it('applies the failure limit in call order before crossing a serial barrier', async () => {
+  it('requests model recovery without blocking later serial tools in the same batch', async () => {
     let serialToolExecuted = false
     const tools = new AgentToolRegistry()
     tools.register({
@@ -576,30 +578,37 @@ describe('ekko-agent runtime', () => {
       definition: { name: 'serial_after_failures', description: 'serial tool', parameters: { type: 'object' } },
       async execute() {
         serialToolExecuted = true
-        return { ok: true, content: 'should not run' }
+        return { ok: true, content: 'continued after recovery request' }
       },
     })
-    const client = modelClient(() => ({
-      content: '',
-      toolCalls: [
-        { id: 'failure-1', name: 'parallel_failure', arguments: { index: 1 } },
-        { id: 'failure-2', name: 'parallel_failure', arguments: { index: 2 } },
-        { id: 'serial-after', name: 'serial_after_failures', arguments: {} },
-      ],
-      finishReason: 'tool_calls',
-    }))
+    const client = modelClient((_request, call) => call === 1
+      ? {
+          content: '',
+          toolCalls: [
+            { id: 'failure-1', name: 'parallel_failure', arguments: { index: 1 } },
+            { id: 'failure-2', name: 'parallel_failure', arguments: { index: 2 } },
+            { id: 'serial-after', name: 'serial_after_failures', arguments: {} },
+          ],
+          finishReason: 'tool_calls',
+        }
+      : { content: 'recovered', finishReason: 'stop' })
     const runtime = new AgentRuntime({
       modelClient: client,
       tools,
-      maxConsecutiveToolFailures: 2,
+      toolFailureRecoveryThreshold: 2,
+    })
+    const events: string[] = []
+
+    const result = await runtime.run({
+      messages: ['recover after failures'],
+      onEvent: event => events.push(event.type),
     })
 
-    const result = await runtime.run({ messages: ['stop after failures'] })
-
-    expect(serialToolExecuted).toBe(false)
-    expect(result.output.finishReason).toBe('tool_failure_limit')
+    expect(serialToolExecuted).toBe(true)
+    expect(result.output).toMatchObject({ content: 'recovered', finishReason: 'stop' })
     expect(result.messages.filter(message => message.role === 'tool').map(message => message.toolCallId))
-      .toEqual(['failure-1', 'failure-2'])
+      .toEqual(['failure-1', 'failure-2', 'serial-after'])
+    expect(events).toContain('run.tool_recovery_required')
   })
 
   it('waits for foreground delegated tasks and hides delegation from the child', async () => {
@@ -974,6 +983,48 @@ describe('ekko-agent runtime', () => {
     }
   })
 
+  it('bounds oversized tool results before the next model request', async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'ekko-runtime-large-result-'))
+    const largeContent = `head-${'x'.repeat(DEFAULT_TOOL_RESULT_MAX_TEXT_BYTES)}-tail`
+    const largeTool: AgentTool = {
+      definition: {
+        name: 'large_result',
+        description: 'Return oversized text',
+        parameters: { type: 'object' },
+      },
+      async execute() {
+        return { ok: true, content: largeContent }
+      },
+    }
+    const tools = new AgentToolRegistry()
+    tools.register(largeTool)
+    let artifactPath = ''
+    const client = modelClient((request, call) => {
+      if (call === 1) {
+        return {
+          content: '',
+          toolCalls: [{ id: 'call_large', name: 'large_result', arguments: {} }],
+          finishReason: 'tool_calls',
+        }
+      }
+      const toolMessage = request.messages.find(message => message.role === 'tool')
+      expect(Buffer.byteLength(toolMessage?.content || '')).toBeLessThan(DEFAULT_TOOL_RESULT_MAX_TEXT_BYTES + 1_000)
+      expect(toolMessage?.content).toContain('tool result truncated')
+      artifactPath = toolMessage?.content.match(/Full output saved to (.+?); inspect it/)?.[1] || ''
+      return { content: 'done', finishReason: 'stop' }
+    })
+
+    try {
+      const result = await new AgentRuntime({ modelClient: client, tools })
+        .run({ messages: ['run large tool'], toolContext: { workspaceRoot } })
+      expect(result.output.content).toBe('done')
+      expect(artifactPath).toContain(join(workspaceRoot, '.ekko-tmp', 'tool-assets'))
+      await expect(readFile(artifactPath, 'utf8')).resolves.toBe(largeContent)
+    } finally {
+      await rm(workspaceRoot, { recursive: true, force: true })
+    }
+  })
+
   it('discovers and executes MCP tools from the run tool context', async () => {
     const client = modelClient((request, call) => {
       if (call === 1) {
@@ -1029,31 +1080,73 @@ describe('ekko-agent runtime', () => {
     expect(result.output.content).toBe('handled missing tool')
   })
 
-  it('stops after consecutive tool failures', async () => {
-    const client = modelClient((_request, call) => ({
-      content: '',
-      toolCalls: [{ id: `call_missing_${call}`, name: 'missing_tool', arguments: {} }],
-    }))
+  it('asks the model to correct or change approach after the same tool fails three times', async () => {
+    const requests: ModelRequest[] = []
+    const client = modelClient((request, call) => {
+      requests.push(request)
+      return call <= 6
+        ? {
+            content: '',
+            toolCalls: [{ id: `call_missing_${call}`, name: 'missing_tool', arguments: {} }],
+          }
+        : { content: 'recovered with another approach', finishReason: 'stop' }
+    })
     const runtime = new AgentRuntime({
       modelClient: client,
       tools: new AgentToolRegistry(),
-      maxConsecutiveToolFailures: 2,
+      toolFailureRecoveryThreshold: 3,
       maxSteps: 10,
     })
-    const events: string[] = []
+    const events: AgentRuntimeEvent[] = []
 
     const result = await runtime.run({
       messages: ['call missing repeatedly'],
-      onEvent: event => events.push(event.type),
+      onEvent: event => events.push(event),
     })
 
     expect(result.output).toMatchObject({
-      content: 'Stopped after 2 consecutive tool failures.',
-      finishReason: 'tool_failure_limit',
+      content: 'recovered with another approach',
+      finishReason: 'stop',
     })
-    expect(result.steps.filter(step => step.type === 'tool')).toHaveLength(2)
-    expect(client.create).toHaveBeenCalledTimes(2)
-    expect(events).toContain('run.tool_failure_limit')
+    expect(result.steps.filter(step => step.type === 'tool')).toHaveLength(6)
+    expect(client.create).toHaveBeenCalledTimes(7)
+    expect(events.filter(event => event.type === 'run.tool_recovery_required')).toHaveLength(2)
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'run.tool_recovery_required',
+      toolName: 'missing_tool',
+      failures: 3,
+    }))
+    expect(requests[3].messages).toContainEqual(expect.objectContaining({
+      role: 'system',
+      content: expect.stringContaining('correct the arguments or prerequisites, or switch to a different tool or approach'),
+    }))
+    expect(requests[6].messages.filter(message => (
+      message.role === 'system' && message.content.includes('Tool recovery required: "missing_tool"')
+    ))).toHaveLength(2)
+  })
+
+  it('does not combine failures from different tools into one recovery streak', async () => {
+    const names = ['missing_a', 'missing_b', 'missing_a', 'missing_b']
+    const client = modelClient((_request, call) => call <= names.length
+      ? {
+          content: '',
+          toolCalls: [{ id: `missing-${call}`, name: names[call - 1], arguments: {} }],
+        }
+      : { content: 'done', finishReason: 'stop' })
+    const events: string[] = []
+
+    const result = await new AgentRuntime({
+      modelClient: client,
+      tools: new AgentToolRegistry(),
+      toolFailureRecoveryThreshold: 3,
+      maxSteps: 10,
+    }).run({
+      messages: ['try alternatives'],
+      onEvent: event => events.push(event.type),
+    })
+
+    expect(result.output.content).toBe('done')
+    expect(events).not.toContain('run.tool_recovery_required')
   })
 
   it('passes abort signals into model requests', async () => {
@@ -2163,6 +2256,8 @@ describe('ekko-agent runtime', () => {
     expect(prompt).toContain('prerequisites named by a Skill as requirements, not proof that they are installed')
     expect(prompt).toContain('perform a lightweight availability check')
     expect(prompt).toContain('Request independent tool calls together in one response')
+    expect(prompt).toContain('complete standalone sentence')
+    expect(prompt).toContain('Do not end tool-call preambles with ":" or "："')
     expect(prompt).toContain('use code_exec, including for one-line snippets')
     expect(prompt).toContain('Do not probe Node or Python with terminal_exec first')
     expect(prompt).toContain('Use terminal_exec for CLI commands')

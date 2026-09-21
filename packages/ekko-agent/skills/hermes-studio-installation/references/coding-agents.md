@@ -4,7 +4,7 @@ Use the Studio Agents page for cross-platform installation. It detects the same 
 
 ## Prerequisites
 
-All four coding agents require Node.js and npm. Hermes Studio itself requires Node.js 23 or newer for npm/source installations.
+All four coding agents require Node.js and npm. Ekko Studio itself requires Node.js 23 or newer for npm/source installations.
 
 Before installing, inspect:
 
@@ -24,10 +24,10 @@ Studio installs these global npm packages:
 | --- | --- | --- |
 | Claude Code | `claude` | `@anthropic-ai/claude-code` |
 | Codex | `codex` | `@openai/codex` |
-| Pi | `pi` | Studio-pinned `@earendil-works/pi-coding-agent` |
+| Pi | `pi` | `@earendil-works/pi-coding-agent` |
 | Grok | `grok` | `@xai-official/grok` |
 
-At this Studio revision, Pi is pinned to `0.84.1`. Its installation is incomplete without Studio's separately pinned `pi-mcp-adapter` `2.24.0`, installed below:
+Pi follows the package's current npm version, like the other coding agents. Its installation is incomplete without `pi-mcp-adapter`, which also follows its current npm version and is installed below:
 
 ```text
 <HERMES_WEB_UI_HOME>/coding-agent/pi-mcp-adapter
@@ -37,14 +37,14 @@ The Agents page install action effectively performs the following. The Pi adapte
 
 ```bash
 npm install -g @anthropic-ai/claude-code
-npm install -g @openai/codex
-npm install -g @earendil-works/pi-coding-agent@0.84.1
-npm install -g @xai-official/grok
+npm install -g @openai/codex --registry=https://registry.npmjs.org
+npm install -g @earendil-works/pi-coding-agent
+npm install -g @xai-official/grok --registry=https://registry.npmjs.org
 studio_home="${HERMES_WEB_UI_HOME:-$HOME/.hermes-web-ui}"
-npm install --prefix "$studio_home/coding-agent/pi-mcp-adapter" --save-exact pi-mcp-adapter@2.24.0
+npm install --prefix "$studio_home/coding-agent/pi-mcp-adapter" pi-mcp-adapter
 ```
 
-Run only the line for the requested Agent. For Pi, run both Pi lines, or use the Agents page so Studio chooses the revision's current pins automatically.
+Run only the line for the requested Agent. For Pi, run both Pi lines, or use the Agents page so Studio installs the packages' current npm versions automatically.
 
 ## Success criteria
 
@@ -74,9 +74,16 @@ Pi deliberately reports **not installed** when its CLI exists but that adapter e
 The Agents page **Check update** action behaves as follows:
 
 - Claude Code: compares the detected version with `npm view @anthropic-ai/claude-code version`.
-- Codex: compares the detected version with `npm view @openai/codex version`.
-- Pi: compares the detected version with Studio's pinned Pi version; it does not chase npm latest independently.
-- Grok: compares the detected version with `npm view @xai-official/grok version`.
+- Codex: compares the detected version with `npm view @openai/codex version --registry=https://registry.npmjs.org`.
+- Pi: compares the detected version with `npm view @earendil-works/pi-coding-agent version`.
+- Grok: compares the detected version with `npm view @xai-official/grok version --registry=https://registry.npmjs.org`.
+
+Studio uses the official npm Registry only for Codex and Grok installation and
+update checks. Codex depends on platform-specific optional packages that may be
+missing from third-party mirrors even when the main package is present; Grok
+mirrors can also expose stale, platform-incompatible releases. Per-command
+registry arguments avoid modifying the user's npm configuration or the registry
+used for other coding Agents.
 
 When an update is available, the update action reruns the same install operation. Revalidate the executable path and version afterward. For Pi, revalidate the adapter too.
 
@@ -93,7 +100,7 @@ Studio builds its command PATH from its current Node directory, npm's global bin
 1. refresh the Agents page to force a new probe;
 2. compare `npm prefix -g` with the prefix used during installation;
 3. inspect all copies of the executable;
-4. fully restart Hermes Studio so it inherits the updated login-shell PATH;
+4. fully restart Ekko Studio so it inherits the updated login-shell PATH;
 5. reinstall only if the resolved executable or package is genuinely absent.
 
 Do not create Agent model or credential configuration during this installation workflow. Authentication is a separate task after installation succeeds.

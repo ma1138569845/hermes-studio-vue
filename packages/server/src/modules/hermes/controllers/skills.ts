@@ -1,3 +1,5 @@
+import { getSkillFileProvider } from '../../studio/public/skill-files'
+import { assertCodingAgentSkillWritable, isSharedCodingAgentSkill } from '../../studio/public/shared-skills'
 import { mkdir, readdir, readFile, realpath, rm, stat, writeFile, cp } from 'fs/promises'
 import { homedir, tmpdir } from 'os'
 import { dirname, join, resolve } from 'path'
@@ -17,6 +19,7 @@ import {
   getSkillUsageSyncCursor,
   syncExternalSkillUsageEvents,
 } from '../../studio/public/skill-usage'
+import { getCodingAgentGlobalHome } from '../../studio/public/coding-agent-global-home'
 
 function requestedProfile(ctx: any): string {
   return ctx.state?.profile?.name || getActiveProfileName() || 'default'
@@ -30,23 +33,30 @@ function requestSkillsDir(ctx: any): string {
   return join(requestProfileDir(ctx), 'skills')
 }
 
-type SkillTarget = 'hermes' | 'claude' | 'codex' | 'pi' | 'grok'
+type SkillTarget = 'hermes' | 'claude' | 'codex' | 'pi' | 'grok' | 'opencode' | 'dsh'
 
 function requestSkillTarget(ctx: any): SkillTarget {
   const target = String(ctx.query?.target || 'hermes').trim().toLowerCase()
-  return target === 'claude' || target === 'codex' || target === 'pi' || target === 'grok' ? target : 'hermes'
+  return target === 'claude' || target === 'codex' || target === 'pi' || target === 'grok' || target === 'opencode' || target === 'dsh' ? target : 'hermes'
 }
 
 function globalSkillsDir(target: Exclude<SkillTarget, 'hermes'>): string {
-  return target === 'claude'
-    ? join(homedir(), '.claude', 'skills')
+  const globalHome = getCodingAgentGlobalHome()
+  return target === 'dsh' ? join(globalHome, '.dsh', 'skills') : target === 'claude'
+    ? join(globalHome, '.claude', 'skills')
     : target === 'grok'
-      ? join(homedir(), '.grok', 'skills')
-      : join(homedir(), '.agents', 'skills')
+      ? join(globalHome, '.grok', 'skills')
+      : target === 'opencode'
+        ? join(globalHome, '.config', 'opencode', 'skills')
+      : join(globalHome, '.agents', 'skills')
 }
 
 function codexSystemSkillsDir(): string {
-  return join(homedir(), '.codex', 'skills', '.system')
+  return join(getCodingAgentGlobalHome(), '.codex', 'skills', '.system')
+}
+
+function sharedAgentSkillsDir(): string {
+  return join(getCodingAgentGlobalHome(), '.agents', 'skills')
 }
 
 function requestTargetSkillsDir(ctx: any): string {
@@ -62,11 +72,19 @@ async function resolveSkillDirForTarget(ctx: any, category: string, skillName: s
     return resolveSkillDirFromConfig(config, skillsDir, category, skillName)
   }
 
+  if (target === 'dsh') {
+    if (category !== 'misc') return null
+    const file = await getSkillFileProvider('dsh').findFile([skillsDir, sharedAgentSkillsDir()], skillName)
+    return file && !file.flat ? file.directory : null
+  }
   const localSkillDir = await findSkillDirInRoot(skillsDir, category, skillName)
   if (localSkillDir) return localSkillDir
 
   if (target === 'codex') {
     return findSkillDirInRoot(codexSystemSkillsDir(), category, skillName)
+  }
+  if (target === 'grok' || target === 'opencode') {
+    return findSkillDirInRoot(sharedAgentSkillsDir(), category, skillName)
   }
 
   return null
@@ -516,6 +534,11 @@ export async function list(ctx: any) {
   const target = requestSkillTarget(ctx)
   const skillsDir = requestTargetSkillsDir(ctx)
   try {
+    if (target === 'dsh') {
+      const roots = [skillsDir, sharedAgentSkillsDir()]
+      ctx.body = { categories: await getSkillFileProvider('dsh').list(roots), archived: [], paths: { local: skillsDir, external: roots.slice(1) } }
+      return
+    }
     if (target !== 'hermes') {
       let categories = await scanSkillsDirIfExists(skillsDir, new Map(), new Set(), [], new Map())
       const extraDirs: string[] = []
@@ -527,9 +550,23 @@ export async function list(ctx: any) {
           'builtin',
         )
         categories = mergeExternalCategories(categories, systemCategories)
+      } else if (target === 'grok' || target === 'opencode') {
+        const sharedDir = sharedAgentSkillsDir()
+        extraDirs.push(sharedDir)
+        const sharedCategories = withSkillSource(
+          await scanSkillsDirIfExists(sharedDir, new Map(), new Set(), [], new Map()),
+          'local',
+        )
+        categories = mergeExternalCategories(categories, sharedCategories)
       }
       ctx.body = {
-        categories,
+        categories: await Promise.all(categories.map(async category => ({
+          ...category,
+          skills: await Promise.all(category.skills.map(async (skill: { name: string }) => {
+            const directory = await resolveSkillDirForTarget(ctx, category.name, skill.name)
+            return { ...skill, readonly: directory ? await isSharedCodingAgentSkill(join(directory, 'SKILL.md')) : true }
+          })),
+        }))),
         archived: [],
         paths: { local: skillsDir, external: extraDirs },
       }
@@ -716,6 +753,10 @@ export async function toggle(ctx: any) {
 export async function listFiles(ctx: any) {
   const { category, skill } = ctx.params
   try {
+    if (requestSkillTarget(ctx) === 'dsh' && category === 'misc') {
+      const file = await getSkillFileProvider('dsh').findFile([requestTargetSkillsDir(ctx), sharedAgentSkillsDir()], skill)
+      if (file?.flat) { ctx.body = { files: [] }; return }
+    }
     const skillDir = await resolveSkillDirForTarget(ctx, category, skill)
     if (!skillDir) {
       ctx.status = 404
@@ -734,6 +775,17 @@ export async function listFiles(ctx: any) {
 export async function readFile_(ctx: any) {
   const filePath = (ctx.params as any).path
   const profileSkillsDir = requestTargetSkillsDir(ctx)
+  if (requestSkillTarget(ctx) === 'dsh') {
+    const parts = String(filePath).split('/')
+    if (parts[0] !== 'misc' || parts.length < 3) { ctx.status = 404; ctx.body = { error: 'File not found' }; return }
+    const file = await getSkillFileProvider('dsh').findFile([profileSkillsDir, sharedAgentSkillsDir()], parts[1])
+    const suffix = parts.slice(2).join('/')
+    const path = file ? (suffix === 'SKILL.md' ? file.path : !file.flat ? resolve(file.directory, suffix) : '') : ''
+    if (!file || !path || !isPathWithin(path, file.directory)) { ctx.status = 404; ctx.body = { error: 'File not found' }; return }
+    const content = await safeReadFile(path)
+    if (content === null) { ctx.status = 404; ctx.body = { error: 'File not found' }; return }
+    ctx.body = { content }; return
+  }
   // Handle 'misc' category: real skill dir is skills/<skill>, not skills/misc/<skill>
   let realPath = filePath
   if (filePath.startsWith('misc/')) {
@@ -853,23 +905,38 @@ export async function updateSkill(ctx: any) {
       }
     }
 
-    const localSkillDir = await findSkillDirInRoot(skillsDir, category, name)
+    if (target === 'dsh') {
+      getSkillFileProvider('dsh').validate(content)
+      const file = category === 'misc' ? await getSkillFileProvider('dsh').findFile([skillsDir, sharedAgentSkillsDir()], name) : null
+      if (!file) { ctx.status = 404; ctx.body = { error: 'Skill not found' }; return }
+      await assertCodingAgentSkillWritable(file.path)
+      await writeFile(file.path, content, 'utf-8')
+      ctx.body = { success: true }; return
+    }
+    const usesSharedAgentSkills = target === 'grok' || target === 'opencode'
+    const localSkillDir = usesSharedAgentSkills
+      ? await resolveSkillDirForTarget(ctx, category, name)
+      : await findSkillDirInRoot(skillsDir, category, name)
     if (!localSkillDir) {
       ctx.status = 404
       ctx.body = { error: 'Skill not found' }
       return
     }
-    if (!isPathWithin(localSkillDir, skillsDir)) {
+    const writableRoots = usesSharedAgentSkills
+      ? [skillsDir, sharedAgentSkillsDir()]
+      : [skillsDir]
+    if (!writableRoots.some(root => isPathWithin(localSkillDir, root))) {
       ctx.status = 403
       ctx.body = { error: 'Access denied' }
       return
     }
 
+    await assertCodingAgentSkillWritable(join(localSkillDir, 'SKILL.md'))
     await writeFile(join(localSkillDir, 'SKILL.md'), content, 'utf-8')
     hashCache.delete(localSkillDir)
     ctx.body = { success: true }
   } catch (err: any) {
-    ctx.status = 500
+    ctx.status = err.status || 500
     ctx.body = { error: err.message }
   }
 }
@@ -926,6 +993,18 @@ export async function deleteSkill(ctx: any) {
     return
   }
 
+  if (requestSkillTarget(ctx) === 'dsh') {
+    const file = category === 'misc' ? await getSkillFileProvider('dsh').findFile([requestTargetSkillsDir(ctx), sharedAgentSkillsDir()], name) : null
+    if (!file) { ctx.status = 404; ctx.body = { error: 'Skill not found' }; return }
+    try { await assertCodingAgentSkillWritable(file.path) } catch (error: any) {
+      ctx.status = error.status || 500; ctx.body = { error: error.message }; return
+    }
+    await rm(file.flat ? file.path : file.directory, { recursive: !file.flat, force: true })
+    ctx.body = { success: true }; return
+  }
+  if (requestSkillTarget(ctx) !== 'hermes') {
+    ctx.status = 403; ctx.body = { error: 'Skill deletion is not supported for this Coding Agent target' }; return
+  }
   const skillsDir = requestSkillsDir(ctx)
   try {
     // Determine source — only allow deleting `local` skills
@@ -953,6 +1032,7 @@ export async function deleteSkill(ctx: any) {
       return
     }
 
+    await assertCodingAgentSkillWritable(join(localSkillDir, 'SKILL.md'))
     await rm(localSkillDir, { recursive: true, force: true })
 
     // Cleanup `disabled` list in profile config so the deleted name doesn't linger
@@ -1039,7 +1119,13 @@ export async function importSkill(ctx: any) {
     return
   }
 
-  const skillsDir = requestSkillsDir(ctx)
+  const target = requestSkillTarget(ctx)
+  if (target !== 'hermes' && target !== 'dsh') { ctx.status = 400; ctx.body = { error: 'Skill import is not supported for this target' }; return }
+  if (target === 'dsh' && category) { ctx.status = 400; ctx.body = { error: 'DSH skills must be imported without a category' }; return }
+  const skillsDir = requestTargetSkillsDir(ctx)
+  try { await assertCodingAgentSkillWritable(category ? join(skillsDir, category) : skillsDir) } catch (error: any) {
+    ctx.status = error.status || 500; ctx.body = { error: error.message }; return
+  }
   await mkdir(skillsDir, { recursive: true })
   const targetRoot = category ? join(skillsDir, category) : skillsDir
 
@@ -1141,13 +1227,14 @@ export async function importSkill(ctx: any) {
         return
       }
 
+      if (target === 'dsh') getSkillFileProvider('dsh').validate((await safeReadFile(join(skillSrcDir, 'SKILL.md'))) || '')
       const targetDir = join(targetRoot, skillName)
       if (!isPathWithin(targetDir, skillsDir)) {
         ctx.status = 400
         ctx.body = { error: 'Resolved target path escapes skills directory' }
         return
       }
-      if (await pathExists(targetDir)) {
+      if (await pathExists(targetDir) || (target === 'dsh' && await getSkillFileProvider('dsh').findFile([skillsDir], skillName))) {
         ctx.status = 409
         ctx.body = { error: `Skill "${skillName}" already exists` }
         return
@@ -1179,6 +1266,10 @@ export async function importSkill(ctx: any) {
         ctx.body = { error: `Invalid skill name "${skillName}"` }
         return
       }
+      if (target === 'dsh') {
+        const definition = filePartsAll.find(p => (p.filename || '').replace(/\\/g, '/') === `${skillName}/SKILL.md`)
+        getSkillFileProvider('dsh').validate(definition?.data.toString('utf-8') || '')
+      }
       // Must include SKILL.md
       const hasSkillMd = filePartsAll.some(p => {
         const rel = (p.filename || '').replace(/\\/g, '/')
@@ -1201,7 +1292,7 @@ export async function importSkill(ctx: any) {
         ctx.body = { error: 'Resolved target path escapes skills directory' }
         return
       }
-      if (await pathExists(targetDir)) {
+      if (await pathExists(targetDir) || (target === 'dsh' && await getSkillFileProvider('dsh').findFile([skillsDir], skillName))) {
         ctx.status = 409
         ctx.body = { error: `Skill "${skillName}" already exists` }
         return
@@ -1233,7 +1324,7 @@ export async function importSkill(ctx: any) {
 
     ctx.body = { success: true, name: skillName }
   } catch (err: any) {
-    ctx.status = 500
+    ctx.status = err.status || 500
     ctx.body = { error: err.message }
   } finally {
     if (stagingDir) {

@@ -1,4 +1,5 @@
 import { existsSync } from 'fs'
+import { compactionPercent, type CodingAgentContextPolicy } from '../context-policy'
 import { copyFile, cp, lstat, mkdir, readFile, readdir, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { writeManagedPromptFile } from '../prompt-file'
@@ -9,8 +10,15 @@ const MANAGED_MCP_NAMES = new Set([
   'hermes-studio-browser',
   'hermes-studio-devices',
   'hermes-studio-use',
+  'ekko-studio-api',
+  'ekko-studio-browser',
+  'ekko-studio-devices',
+  'ekko-studio-use',
+  'ekko-studio-plan',
+  'ekko-studio-interaction',
   'hermes-studio',
   'hermes-studio-mcp',
+  'ekko-studio-mcp',
   'hermes-web-ui-mcp',
 ])
 const COPIED_GLOBAL_DIRS = new Set([
@@ -24,8 +32,8 @@ const COPIED_GLOBAL_DIRS = new Set([
   'workflows',
 ])
 const MANAGED_MCP_MARKER = 'HERMES_WEB_UI_MANAGED_MCP'
-const SCOPED_IDENTITY_BEGIN = '<!-- BEGIN HERMES STUDIO GROK SCOPED IDENTITY -->'
-const SCOPED_IDENTITY_END = '<!-- END HERMES STUDIO GROK SCOPED IDENTITY -->'
+const SCOPED_IDENTITY_BEGIN = '<!-- BEGIN EKKO STUDIO GROK SCOPED IDENTITY -->'
+const SCOPED_IDENTITY_END = '<!-- END EKKO STUDIO GROK SCOPED IDENTITY -->'
 
 export interface GrokRuntimeFiles {
   promptFile: string
@@ -55,7 +63,7 @@ function mcpServerName(header: string): string {
   return String(match?.[1] || match?.[2] || '').trim()
 }
 
-export function stripManagedGrokMcp(content: string): string {
+function grokConfigBlocks(content: string): string[][] {
   const blocks: string[][] = []
   let current: string[] = []
   for (const line of String(content || '').split(/\r?\n/)) {
@@ -66,17 +74,201 @@ export function stripManagedGrokMcp(content: string): string {
     current.push(line)
   }
   if (current.length > 0) blocks.push(current)
-
   return blocks
+}
+
+function joinGrokConfigBlocks(blocks: string[][]): string {
+  return blocks
+    .map(block => block.join('\n').trimEnd())
+    .filter(block => block.trim())
+    .join('\n\n')
+    .trim()
+}
+
+function isManagedMcpBlock(block: string[]): boolean {
+  const name = mcpServerName(block[0] || '')
+  return Boolean(name) && (
+    MANAGED_MCP_NAMES.has(name) ||
+    block.join('\n').includes(MANAGED_MCP_MARKER)
+  )
+}
+
+export function grokSettingsConfig(content: string): string {
+  const value = joinGrokConfigBlocks(
+    grokConfigBlocks(content).filter(block => !mcpServerName(block[0] || '')),
+  )
+  return value ? `${value}\n` : ''
+}
+
+interface TomlArrayScanState {
+  quote: '"' | "'" | null
+  multiline: boolean
+}
+
+function scanTomlArrayBrackets(line: string, state: TomlArrayScanState): number {
+  let delta = 0
+  let escaped = false
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index]
+    if (state.quote) {
+      if (state.multiline) {
+        if (state.quote === '"' && char === '\\') {
+          escaped = !escaped
+          continue
+        }
+        if (char === state.quote && !escaped) {
+          let quoteCount = 1
+          while (line[index + quoteCount] === state.quote) quoteCount += 1
+          if (quoteCount >= 3) {
+            state.quote = null
+            state.multiline = false
+            index += quoteCount - 1
+          }
+        }
+        escaped = false
+        continue
+      }
+      if (state.quote === '"' && char === '\\' && !escaped) {
+        escaped = true
+        continue
+      }
+      if (char === state.quote && !escaped) {
+        state.quote = null
+      }
+      escaped = false
+      continue
+    }
+    if (char === '#') break
+    if (char === '"' || char === "'") {
+      state.quote = char
+      state.multiline = line.slice(index, index + 3) === char.repeat(3)
+      if (state.multiline) index += 2
+      continue
+    }
+    if (char === '[') delta += 1
+    else if (char === ']') delta -= 1
+  }
+  return delta
+}
+
+function isManagedGrokSection(section: string): boolean {
+  return section === 'models'
+    || section.startsWith('model.')
+    || section.startsWith('mcp_servers.')
+    || section === 'auth'
+    || section.startsWith('auth.')
+    || section === 'account'
+    || section.startsWith('account.')
+}
+
+export function grokRuntimeSettingsConfig(...contents: Array<string | null | undefined>): string {
+  const topLevel = new Map<string, string>()
+  const sections = new Map<string, { header: string; lines: string[] }>()
+  const runtimeKeys = new Set([
+    'model',
+    'default',
+    'default_reasoning_effort',
+    'context_window',
+    'max_completion_tokens',
+    'api_key',
+    'access_token',
+    'refresh_token',
+    'auth_token',
+  ])
+
+  let arraySectionIndex = 0
+  for (const content of contents) {
+    let section = ''
+    let sectionKey = ''
+    const sectionScanState: TomlArrayScanState = { quote: null, multiline: false }
+    const lines = String(content || '').split(/\r?\n/)
+    for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+      const line = lines[lineIndex]
+      if (sectionScanState.multiline) {
+        const sectionBlock = sections.get(sectionKey)
+        if (sectionBlock && !isManagedGrokSection(section)) sectionBlock.lines.push(line)
+        scanTomlArrayBrackets(line, sectionScanState)
+        continue
+      }
+      const arrayHeader = line.match(/^\s*\[\[([^\]]+)\]\]\s*$/)
+      if (arrayHeader) {
+        section = arrayHeader[1].trim()
+        if (isManagedGrokSection(section)) {
+          sectionKey = ''
+          continue
+        }
+        sectionKey = `array:${arraySectionIndex++}`
+        sections.set(sectionKey, { header: line.trim(), lines: [] })
+        continue
+      }
+      const tableHeader = line.match(/^\s*\[([^\]]+)\]\s*$/)
+      if (tableHeader) {
+        section = tableHeader[1].trim()
+        sectionKey = `table:${section}`
+        if (!sections.has(sectionKey)) sections.set(sectionKey, { header: line.trim(), lines: [] })
+        continue
+      }
+      const assignment = line.match(/^\s*([A-Za-z0-9_.-]+)\s*=/)
+      if (!section) {
+        if (assignment && !runtimeKeys.has(assignment[1])) {
+          let mergedLine = line
+          const scanState: TomlArrayScanState = { quote: null, multiline: false }
+          let bracketDepth = scanTomlArrayBrackets(line.slice(line.indexOf('=') + 1), scanState)
+          while ((bracketDepth > 0 || scanState.multiline) && lineIndex + 1 < lines.length) {
+            lineIndex += 1
+            const nextLine = lines[lineIndex]
+            mergedLine += `\n${nextLine}`
+            bracketDepth += scanTomlArrayBrackets(nextLine, scanState)
+          }
+          topLevel.set(assignment[1], mergedLine)
+        }
+        continue
+      }
+      if (isManagedGrokSection(section)) {
+        scanTomlArrayBrackets(line, sectionScanState)
+        continue
+      }
+      const sectionBlock = sections.get(sectionKey)
+      if (sectionBlock && line.trim()) sectionBlock.lines.push(line)
+      scanTomlArrayBrackets(line, sectionScanState)
+    }
+  }
+
+  const blocks = [...topLevel.values()]
+  for (const [key, { header, lines }] of sections) {
+    if (lines.length || key.startsWith('array:')) {
+      blocks.push(lines.length ? `${header}\n${lines.join('\n')}` : header)
+    }
+  }
+  return blocks.join('\n\n')
+}
+
+export function grokUserMcpConfig(content: string): string {
+  const value = joinGrokConfigBlocks(
+    grokConfigBlocks(content).filter(block => (
+      Boolean(mcpServerName(block[0] || '')) && !isManagedMcpBlock(block)
+    )),
+  )
+  return value ? `${value}\n` : ''
+}
+
+export function stripManagedGrokMcp(content: string): string {
+  return joinGrokConfigBlocks(grokConfigBlocks(content)
     .filter((block) => {
       const name = mcpServerName(block[0] || '')
       if (!name) return true
-      return !MANAGED_MCP_NAMES.has(name) && !block.join('\n').includes(MANAGED_MCP_MARKER)
-    })
-    .map(block => block.join('\n').trimEnd())
-    .filter(Boolean)
-    .join('\n\n')
-    .trim()
+      return !isManagedMcpBlock(block)
+    }))
+}
+
+export function mergeGrokSettingsConfig(existingContent: string, settingsContent: string): string {
+  return [grokSettingsConfig(settingsContent).trim(), grokUserMcpConfig(existingContent).trim()]
+    .filter(Boolean).join('\n\n').concat('\n')
+}
+
+export function mergeGrokUserMcpConfig(existingContent: string, mcpContent: string): string {
+  return [grokSettingsConfig(existingContent).trim(), grokUserMcpConfig(mcpContent).trim()]
+    .filter(Boolean).join('\n\n').concat('\n')
 }
 
 export function mergeGrokConfigWithManagedMcp(content: string, managedMcpToml: string): string {
@@ -95,6 +287,18 @@ async function copyGlobalDirectory(source: string, target: string): Promise<void
     force: false,
     preserveTimestamps: true,
   })
+}
+
+async function syncSkillsDirectory(source: string, target: string): Promise<void> {
+  if (!existsSync(source)) return
+  await cp(source, target, {
+    recursive: true, dereference: true, errorOnExist: false, force: true, preserveTimestamps: true,
+  })
+}
+
+async function syncGlobalSkillsDirectories(sourceHome: string, rootDir: string): Promise<void> {
+  await syncSkillsDirectory(join(sourceHome, 'skills'), join(rootDir, 'skills'))
+  await syncSkillsDirectory(join(sourceHome, '..', '.agents', 'skills'), join(rootDir, 'skills'))
 }
 
 function shouldCopyGlobalFile(name: string): boolean {
@@ -123,6 +327,7 @@ export async function prepareGlobalGrokRuntime(input: {
       }
     }
   }
+  await syncGlobalSkillsDirectories(input.sourceHome, input.rootDir)
 
   const configPath = join(input.rootDir, 'config.toml')
   const promptFile = join(input.rootDir, 'AGENTS.md')
@@ -168,6 +373,7 @@ export function scopedGrokIdentityPrompt(provider: string, model: string): strin
 }
 
 export async function prepareScopedGrokRuntime(input: {
+  sourceHome?: string
   rootDir: string
   provider: string
   model: string
@@ -175,15 +381,19 @@ export async function prepareScopedGrokRuntime(input: {
   proxyBaseUrl: string
   contextWindow: number
   outputLimit: number
+  contextPolicy?: CodingAgentContextPolicy
   reasoningEffort: string
   systemPrompt: string
   userInstructions: string
+  settingsContent?: string
   managedMcpToml: string
 }): Promise<GrokRuntimeFiles> {
   await mkdir(input.rootDir, { recursive: true, mode: 0o700 })
+  if (input.sourceHome) await syncGlobalSkillsDirectories(input.sourceHome, input.rootDir)
   const configPath = join(input.rootDir, 'config.toml')
   const promptFile = join(input.rootDir, 'AGENTS.md')
   const config = [
+    grokRuntimeSettingsConfig(input.settingsContent),
     '[models]',
     `default = ${tomlString(GROK_PROVIDER_ID)}`,
     ...(input.reasoningEffort ? [`default_reasoning_effort = ${tomlString(input.reasoningEffort)}`] : []),
@@ -196,6 +406,7 @@ export async function prepareScopedGrokRuntime(input: {
     'api_backend = "responses"',
     `context_window = ${Math.max(1, Math.floor(input.contextWindow))}`,
     `max_completion_tokens = ${Math.max(1, Math.floor(input.outputLimit))}`,
+    ...(input.contextPolicy ? [`auto_compact_threshold_percent = ${compactionPercent(input.contextPolicy.threshold)}`] : []),
     '',
     input.managedMcpToml.trim(),
     '',

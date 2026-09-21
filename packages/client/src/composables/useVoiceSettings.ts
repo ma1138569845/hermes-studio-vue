@@ -1,4 +1,6 @@
 import { ref, watch } from 'vue'
+import { fetchTtsSettings, type FetchTtsSettingsResponse } from '@/api/studio/tts-settings'
+import { getActiveProfileName, getStoredUserId, hasApiKey } from '@/api/client'
 import { DOUBAO_TTS_2_RESOURCE_ID, DOUBAO_TTS_DEFAULT_VOICE } from '@/constants/doubaoTtsVoices'
 
 export type TtsProvider =
@@ -56,6 +58,7 @@ export interface VoiceSettingsData {
   doubaoModel: string
   doubaoVoice: string
   doubaoStylePrompt: string
+  doubaoSpeed: string
 }
 
 const STORAGE_KEY = 'hermes-tts-settings-v2'
@@ -117,6 +120,7 @@ const DEFAULT: VoiceSettingsData = {
   doubaoModel: DOUBAO_TTS_2_RESOURCE_ID,
   doubaoVoice: DOUBAO_TTS_DEFAULT_VOICE,
   doubaoStylePrompt: '',
+  doubaoSpeed: '1',
 }
 
 function sanitize(data: VoiceSettingsData): VoiceSettingsData {
@@ -143,6 +147,53 @@ function load(): VoiceSettingsData {
 
 // Run migration once on import
 migrateOldKeys()
+
+let serverSettingsLoadedContext: string | null = null
+let serverSettingsPromise: Promise<void> | null = null
+let serverSettingsPromiseContext: string | null = null
+let serverSettingsGeneration = 0
+
+function serverSettingsContext(): string | null {
+  if (!hasApiKey()) return null
+  const user = getStoredUserId() ?? 'authenticated'
+  const profile = getActiveProfileName()?.trim() || 'default'
+  return `${user}:${profile}`
+}
+
+function applyServerTtsSettings(response: FetchTtsSettingsResponse) {
+  if (response.activeProvider) {
+    provider.value = response.activeProvider
+  }
+  const doubao = response.providers.find(row => row.provider === 'doubao')
+  doubaoSpeed.value = doubao?.settings.speed?.trim() || DEFAULT.doubaoSpeed
+}
+
+export async function loadServerTtsSettings(force = false): Promise<void> {
+  const context = serverSettingsContext()
+  if (!context) return
+  if (serverSettingsLoadedContext === context && !force) return
+  if (serverSettingsPromise && serverSettingsPromiseContext === context && !force) {
+    return serverSettingsPromise
+  }
+
+  const generation = ++serverSettingsGeneration
+  const promise = fetchTtsSettings()
+    .then(response => {
+      if (generation !== serverSettingsGeneration || serverSettingsContext() !== context) return
+      applyServerTtsSettings(response)
+      serverSettingsLoadedContext = context
+    })
+    .finally(() => {
+      if (serverSettingsPromise === promise) {
+        serverSettingsPromise = null
+        serverSettingsPromiseContext = null
+      }
+    })
+
+  serverSettingsPromise = promise
+  serverSettingsPromiseContext = context
+  return promise
+}
 
 // ── Reactive state ──
 const provider = ref<TtsProvider>(load().provider)
@@ -184,6 +235,7 @@ const doubaoBaseUrl = ref<string>(load().doubaoBaseUrl)
 const doubaoModel = ref<string>(load().doubaoModel)
 const doubaoVoice = ref<string>(load().doubaoVoice)
 const doubaoStylePrompt = ref<string>(load().doubaoStylePrompt)
+const doubaoSpeed = ref<string>(load().doubaoSpeed)
 
 // Auto-persist on change
 watch(
@@ -191,7 +243,7 @@ watch(
    customUrl, customApiKey, edgeUrl, edgeVoice, edgeRate, edgePitchHz,
    mimoApiKey, mimoAuthMode, mimoBaseUrl, mimoModel, mimoVoice, mimoVoiceDesignDesc,
    mimoVoiceCloneDataUri, mimoVoiceCloneFileName, mimoVoiceCloneFormat, mimoStylePrompt,
-   doubaoApiKey, doubaoBaseUrl, doubaoModel, doubaoVoice, doubaoStylePrompt],
+   doubaoApiKey, doubaoBaseUrl, doubaoModel, doubaoVoice, doubaoStylePrompt, doubaoSpeed],
   () => {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
@@ -222,6 +274,7 @@ watch(
         doubaoModel: doubaoModel.value,
         doubaoVoice: doubaoVoice.value,
         doubaoStylePrompt: doubaoStylePrompt.value,
+        doubaoSpeed: doubaoSpeed.value,
       }))
     } catch (err) {
       console.warn('[useVoiceSettings] Failed to persist voice settings:', err)
@@ -258,6 +311,9 @@ export function useVoiceSettings() {
     doubaoModel,
     doubaoVoice,
     doubaoStylePrompt,
+    doubaoSpeed,
+
+    loadServerTtsSettings,
 
     setProvider(v: TtsProvider) { provider.value = v },
     setWebSpeechVoice(v: string) { webspeechVoice.value = v },
@@ -286,6 +342,7 @@ export function useVoiceSettings() {
     setDoubaoModel(v: string) { doubaoModel.value = v },
     setDoubaoVoice(v: string) { doubaoVoice.value = v },
     setDoubaoStylePrompt(v: string) { doubaoStylePrompt.value = v },
+    setDoubaoSpeed(v: string) { doubaoSpeed.value = v },
 
     reset() {
       provider.value = DEFAULT.provider
@@ -315,6 +372,7 @@ export function useVoiceSettings() {
       doubaoModel.value = DEFAULT.doubaoModel
       doubaoVoice.value = DEFAULT.doubaoVoice
       doubaoStylePrompt.value = DEFAULT.doubaoStylePrompt
+      doubaoSpeed.value = DEFAULT.doubaoSpeed
     },
   }
 }

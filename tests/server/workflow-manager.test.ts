@@ -135,6 +135,7 @@ describe('workflow manager', () => {
   it('maps workflow node agents to the existing run backends', async () => {
     const { resolveWorkflowNodeRunTarget } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
 
+    expect(resolveWorkflowNodeRunTarget('dsh')).toEqual({ type: 'workflow', source: 'workflow', agent: 'dsh', codingAgentId: 'dsh' })
     expect(resolveWorkflowNodeRunTarget('hermes')).toEqual({
       type: 'workflow',
       source: 'workflow',
@@ -271,8 +272,9 @@ describe('workflow manager', () => {
     })
     expect(workflow.nodes[0]?.data).not.toHaveProperty('executionPolicy')
     try {
-      const result = await manager.runNow(workflow.id)
+      const result = await manager.runNow(workflow.id, { user: { id: 42, username: 'owner', role: 'super_admin' } })
       expect(result.run.status).toBe('completed')
+      expect(result.run.user_id).toBe(42)
       expect(result.run.snapshot_nodes[0]).toMatchObject({ data: {
         provider: 'custom:test', model: 'model-a', apiMode: 'chat_completions', reasoningEffort: 'high',
       } })
@@ -406,6 +408,55 @@ describe('workflow manager', () => {
         .get(result.nodeSessions[0]!.session_id)).toEqual({
           source: 'workflow',
           agent: 'codex',
+          agent_mode: 'global',
+          provider: 'global',
+          model: '',
+          api_mode: '',
+        })
+    } finally { await manager.delete(workflow.id) }
+  })
+
+  it('keeps a selected DSH preset in workflow snapshots and execution', async () => {
+    const { initAllStores } = await import('../../packages/server/src/modules/studio/infrastructure/database/init')
+    const { getDb } = await import('../../packages/server/src/modules/studio/infrastructure/database/index')
+    const { WorkflowManager } = await import('../../packages/server/src/modules/studio/services/workflow/manager')
+    initAllStores()
+    chatRunMock.runAndWait.mockReset().mockResolvedValue({ ok: true, output: 'done' })
+    const manager = new WorkflowManager()
+    const workflow = manager.create({
+      name: `DSH preset execution ${Date.now()}`,
+      profile: 'default',
+      nodes: [{ id: 'agent', type: 'agent', data: {
+        title: 'DSH preset', agent: 'dsh', agentMode: 'global',
+        provider: 'must-not-leak', model: 'must-not-leak', apiMode: 'chat_completions',
+        reasoningEffort: 'high', agentPreset: 'minimal', input: 'work',
+      } }],
+      edges: [],
+    })
+    try {
+      const result = await manager.runNow(workflow.id)
+      const runInput = chatRunMock.runAndWait.mock.calls[0]?.[0]
+      expect(runInput).toMatchObject({
+        coding_agent_id: 'dsh',
+        agent_id: 'dsh',
+        mode: 'global',
+        agent_preset: 'minimal',
+        profile: 'default',
+        one_shot_model: true,
+      })
+      expect(runInput).not.toHaveProperty('provider')
+      expect(runInput).not.toHaveProperty('model')
+      expect(runInput).not.toHaveProperty('apiMode')
+      expect(runInput).not.toHaveProperty('reasoning_effort')
+      expect(result.nodeSessions[0]).toMatchObject({
+        agent: 'dsh',
+        agent_mode: 'global',
+        status: 'completed',
+      })
+      expect(getDb()!.prepare(`SELECT source, agent, agent_mode, provider, model, api_mode FROM sessions WHERE id = ?`)
+        .get(result.nodeSessions[0]!.session_id)).toEqual({
+          source: 'workflow',
+          agent: 'dsh',
           agent_mode: 'global',
           provider: 'global',
           model: '',
@@ -1605,10 +1656,11 @@ describe('workflow manager', () => {
         { id: 'retry', source: 'latch', target: 'header', data: { orchestration: { route: 'success', feedback: { maxIterations: 3 } } } },
       ],
     })
+    // Exercise the mocked chat-run timeout, not a wall-clock deadline during setup.
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(Date.now())
     try {
       const result = await manager.runNow(workflow.id, { timeoutMs: 25 })
-      expect(actualTimeoutMs).toBeGreaterThan(0)
-      expect(actualTimeoutMs).toBeLessThanOrEqual(25)
+      expect(actualTimeoutMs).toBe(25)
       const timeoutError = `chat-run timed out after ${actualTimeoutMs}ms`
       expect({ status: result.run.status, error: result.run.error }).toEqual({ status: 'failed', error: timeoutError })
       expect(result.nodeSessions.map(session => [session.execution_id, session.status, session.error])).toEqual([
@@ -1617,7 +1669,10 @@ describe('workflow manager', () => {
       expect(listWorkflowRunLoopEpochs(result.run.id).map(epoch => ({ status: epoch.status, exitReason: epoch.exit_reason }))).toEqual([
         { status: 'timed_out', exitReason: timeoutError },
       ])
-    } finally { await manager.delete(workflow.id) }
+    } finally {
+      nowSpy.mockRestore()
+      await manager.delete(workflow.id)
+    }
   })
 
   it('fails closed when timed_out loop epoch evidence cannot be persisted', async () => {
@@ -1642,12 +1697,15 @@ describe('workflow manager', () => {
         { id: 'retry', source: 'latch', target: 'header', data: { orchestration: { route: 'success', feedback: { maxIterations: 3 } } } },
       ],
     })
+    // Keep setup time from expiring the run before runAndWait returns its timeout.
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(Date.now())
     try {
       const result = await manager.runNow(workflow.id, { timeoutMs: 25 })
       expect(result.run.status).toBe('failed')
       expect(result.run.error).toContain('timed out loop epoch write failed')
       expect(chatRunMock.runAndWait).toHaveBeenCalledTimes(1)
     } finally {
+      nowSpy.mockRestore()
       db.exec('DROP TRIGGER IF EXISTS fail_timed_out_loop_epoch')
       await manager.delete(workflow.id)
     }

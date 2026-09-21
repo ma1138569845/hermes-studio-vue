@@ -41,7 +41,7 @@ function createLauncherFixture(parent: string, gitMarker?: GitMarker): string {
     writeFileSync(join(root, '.git'), `gitdir: ${gitDir}\n`)
   }
   mkdirSync(join(root, 'bin'))
-  const launcher = join(root, 'bin/hermes-studio-mcp.mjs')
+  const launcher = join(root, 'bin/ekko-studio-mcp.mjs')
   writeFileSync(launcher, '#!/usr/bin/env node\n')
   return launcher
 }
@@ -101,6 +101,7 @@ describe('studio MCP autoinject', () => {
   })
 
   afterEach(() => {
+    vi.unstubAllEnvs()
     delete process.env.HERMES_WEB_UI_MCP_BIN
     for (const root of fixtureRoots.splice(0).reverse()) rmSync(root, { recursive: true, force: true })
   })
@@ -113,60 +114,86 @@ describe('studio MCP autoinject', () => {
     expect(result.targets.map(target => target.profile)).toEqual(['default', 'work'])
     expect(updateConfigYamlForProfileMock).toHaveBeenCalledTimes(2)
     const injectedDefault = await updateConfigYamlForProfileMock.mock.calls[0][1]({})
-    expect(injectedDefault.data.mcp_servers['hermes-studio-api']).toEqual({
+    expect(injectedDefault.data.mcp_servers['ekko-studio-api']).toEqual({
       command: process.execPath,
       args: [stableLauncher, 'api'],
       env: {
+        ELECTRON_RUN_AS_NODE: '1',
         HERMES_WEB_UI_URL: 'http://127.0.0.1:8648',
         HERMES_WEB_UI_HOME: '/Users/test/.hermes-web-ui',
         HERMES_WEBUI_STATE_DIR: '/Users/test/.hermes-web-ui',
         HERMES_WEB_UI_PROFILE: 'default',
-        HERMES_MCP_SERVER_NAME: 'hermes-studio-api',
+        HERMES_MCP_SERVER_NAME: 'ekko-studio-api',
         HERMES_MCP_TOOLSET: 'api',
+        HERMES_MCP_USER_CLARIFICATION: '0',
         HERMES_WEB_UI_MANAGED_MCP: '1',
       },
       enabled: true,
     })
-    expect(injectedDefault.data.mcp_servers['hermes-studio-browser']).toMatchObject({
+    expect(injectedDefault.data.mcp_servers['ekko-studio-browser']).toMatchObject({
       command: process.execPath,
       args: [stableLauncher, 'browser'],
       env: {
-        HERMES_MCP_SERVER_NAME: 'hermes-studio-browser',
+        HERMES_MCP_SERVER_NAME: 'ekko-studio-browser',
         HERMES_MCP_TOOLSET: 'browser',
       },
       enabled: true,
     })
-    expect(injectedDefault.data.mcp_servers['hermes-studio-devices']).toMatchObject({
+    expect(injectedDefault.data.mcp_servers['ekko-studio-devices']).toMatchObject({
       command: process.execPath,
       args: [stableLauncher, 'devices'],
       env: {
-        HERMES_MCP_SERVER_NAME: 'hermes-studio-devices',
+        HERMES_MCP_SERVER_NAME: 'ekko-studio-devices',
         HERMES_MCP_TOOLSET: 'devices',
       },
       enabled: true,
     })
-    expect(injectedDefault.data.mcp_servers['hermes-studio-use']).toMatchObject({
+    expect(injectedDefault.data.mcp_servers['ekko-studio-use']).toMatchObject({
       command: process.execPath,
       args: [stableLauncher, 'use'],
       timeout: 1860,
       env: {
-        HERMES_MCP_SERVER_NAME: 'hermes-studio-use',
+        HERMES_MCP_SERVER_NAME: 'ekko-studio-use',
         HERMES_MCP_TOOLSET: 'use',
       },
       enabled: true,
     })
-    expect(injectedDefault.data.mcp_servers['hermes-studio-api']).not.toHaveProperty('timeout')
-    expect(injectedDefault.data.mcp_servers['hermes-studio-browser']).not.toHaveProperty('timeout')
-    expect(injectedDefault.data.mcp_servers['hermes-studio-devices']).not.toHaveProperty('timeout')
+    expect(injectedDefault.data.mcp_servers['ekko-studio-api']).not.toHaveProperty('timeout')
+    expect(injectedDefault.data.mcp_servers['ekko-studio-browser']).not.toHaveProperty('timeout')
+    expect(injectedDefault.data.mcp_servers['ekko-studio-devices']).not.toHaveProperty('timeout')
     const injectedWork = await updateConfigYamlForProfileMock.mock.calls[1][1]({})
-    expect(injectedWork.data.mcp_servers['hermes-studio-api'].env.HERMES_WEB_UI_PROFILE).toBe('work')
+    expect(injectedWork.data.mcp_servers['ekko-studio-api'].env.HERMES_WEB_UI_PROFILE).toBe('work')
     expect(result.serverNames).toEqual([
-      'hermes-studio-api',
-      'hermes-studio-browser',
-      'hermes-studio-devices',
-      'hermes-studio-use',
+      'ekko-studio-api',
+      'ekko-studio-browser',
+      'ekko-studio-devices',
+      'ekko-studio-use',
+      'ekko-studio-interaction',
     ])
     expect(result.command).toBe(process.execPath)
+  })
+
+  it.each([undefined, '0'])('repairs managed MCP Node mode %s and then leaves the config unchanged', async (runAsNode) => {
+    vi.stubEnv('HERMES_DESKTOP', 'true')
+    vi.stubEnv('ELECTRON_RUN_AS_NODE', undefined)
+    const { injectBundledMcpServer } = await import('../../packages/server/src/modules/hermes/services/mcp/studio-autoinject')
+    await injectBundledMcpServer()
+    const updater = updateConfigYamlForProfileMock.mock.calls[0][1]
+    const initial = await updater({})
+    for (const server of Object.values(initial.data.mcp_servers) as any[]) {
+      expect(server.command).toBe(process.execPath)
+      expect(server.env.ELECTRON_RUN_AS_NODE).toBe('1')
+      if (runAsNode === undefined) delete server.env.ELECTRON_RUN_AS_NODE
+      else server.env.ELECTRON_RUN_AS_NODE = runAsNode
+    }
+    initial.data.mcp_servers['ekko-studio-api'].timeout = 42
+    const repaired = await updater(initial.data)
+    expect(repaired.result.status).toBe('updated')
+    for (const server of Object.values(repaired.data.mcp_servers) as any[]) {
+      expect(server.env.ELECTRON_RUN_AS_NODE).toBe('1')
+    }
+    expect(repaired.data.mcp_servers['ekko-studio-api'].timeout).toBe(42)
+    expect((await updater(repaired.data)).result.status).toBe('unchanged')
   })
 
   it('migrates an existing managed use server from the default MCP timeout', async () => {
@@ -176,13 +203,13 @@ describe('studio MCP autoinject', () => {
     const updater = updateConfigYamlForProfileMock.mock.calls[0][1]
     const initial = await updater({})
     const stale = structuredClone(initial.data)
-    delete stale.mcp_servers['hermes-studio-use'].timeout
+    delete stale.mcp_servers['ekko-studio-use'].timeout
 
     const migrated = await updater(stale)
 
     expect(migrated.result.status).toBe('updated')
-    expect(migrated.data.mcp_servers['hermes-studio-use'].timeout).toBe(1860)
-    expect(migrated.data.mcp_servers['hermes-studio-api']).not.toHaveProperty('timeout')
+    expect(migrated.data.mcp_servers['ekko-studio-use'].timeout).toBe(1860)
+    expect(migrated.data.mcp_servers['ekko-studio-api']).not.toHaveProperty('timeout')
   })
 
   it('preserves an existing timeout on an unrelated managed server during config resync', async () => {
@@ -192,14 +219,14 @@ describe('studio MCP autoinject', () => {
     const updater = updateConfigYamlForProfileMock.mock.calls[0][1]
     const initial = await updater({})
     const configured = structuredClone(initial.data)
-    configured.mcp_servers['hermes-studio-api'].timeout = 42
-    configured.mcp_servers['hermes-studio-api'].env.HERMES_WEB_UI_URL = 'http://127.0.0.1:9999'
+    configured.mcp_servers['ekko-studio-api'].timeout = 42
+    configured.mcp_servers['ekko-studio-api'].env.HERMES_WEB_UI_URL = 'http://127.0.0.1:9999'
 
     const resynced = await updater(configured)
 
     expect(resynced.result.status).toBe('updated')
-    expect(resynced.data.mcp_servers['hermes-studio-api'].env.HERMES_WEB_UI_URL).toBe('http://127.0.0.1:8648')
-    expect(resynced.data.mcp_servers['hermes-studio-api'].timeout).toBe(42)
+    expect(resynced.data.mcp_servers['ekko-studio-api'].env.HERMES_WEB_UI_URL).toBe('http://127.0.0.1:8648')
+    expect(resynced.data.mcp_servers['ekko-studio-api'].timeout).toBe(42)
   })
 
   it('skips autoinject for transient preview homes by default', async () => {
@@ -217,11 +244,11 @@ describe('studio MCP autoinject', () => {
     const { injectBundledMcpServer } = await import('../../packages/server/src/modules/hermes/services/mcp/studio-autoinject')
     const result = await injectBundledMcpServer()
     const injected = await updateConfigYamlForProfileMock.mock.calls[0][1]({})
-    expect(injected.data.mcp_servers['hermes-studio-browser']).toMatchObject({
+    expect(injected.data.mcp_servers['ekko-studio-browser']).toMatchObject({
       args: [stableLauncher, 'browser'],
-      env: { HERMES_MCP_SERVER_NAME: 'hermes-studio-browser', HERMES_MCP_TOOLSET: 'browser' },
+      env: { HERMES_MCP_SERVER_NAME: 'ekko-studio-browser', HERMES_MCP_TOOLSET: 'browser' },
     })
-    expect(result.serverNames).toContain('hermes-studio-browser')
+    expect(result.serverNames).toContain('ekko-studio-browser')
   })
 
   it('does not remove the desktop browser entry when a Web UI process resyncs the shared profile', async () => {
@@ -230,12 +257,12 @@ describe('studio MCP autoinject', () => {
 
     const updater = updateConfigYamlForProfileMock.mock.calls[0][1]
     const desktopManaged = await updater({})
-    const browserBefore = structuredClone(desktopManaged.data.mcp_servers['hermes-studio-browser'])
+    const browserBefore = structuredClone(desktopManaged.data.mcp_servers['ekko-studio-browser'])
     const webUiResync = await updater(desktopManaged.data)
 
     expect(webUiResync.write).toBe(false)
     expect(webUiResync.result.status).toBe('unchanged')
-    expect(webUiResync.data.mcp_servers['hermes-studio-browser']).toEqual(browserBefore)
+    expect(webUiResync.data.mcp_servers['ekko-studio-browser']).toEqual(browserBefore)
   })
 
   it('skips autoinject for a transient bundled launcher even with a stable app home', async () => {
@@ -310,6 +337,48 @@ describe('studio MCP autoinject', () => {
     expect(updateConfigYamlForProfileMock).toHaveBeenCalledTimes(2)
   })
 
+  it.each([true, false])('renames the managed plan server while preserving enabled=%s and hiding clarification', async enabled => {
+    const { injectBundledMcpServer } = await import('../../packages/server/src/modules/hermes/services/mcp/studio-autoinject')
+    await injectBundledMcpServer()
+    const updater = updateConfigYamlForProfileMock.mock.calls[0][1]
+    const current = (await updater({})).data
+    const legacy = current.mcp_servers['ekko-studio-interaction']
+    legacy.enabled = enabled
+    legacy.env.HERMES_MCP_SERVER_NAME = 'ekko-studio-plan'
+    delete legacy.env.HERMES_MCP_USER_CLARIFICATION
+    current.mcp_servers['ekko-studio-plan'] = legacy
+    delete current.mcp_servers['ekko-studio-interaction']
+    const migrated = await updater(current)
+    expect(migrated.write).not.toBe(false)
+    expect(migrated.data.mcp_servers['ekko-studio-plan']).toBeUndefined()
+    const server = migrated.data.mcp_servers['ekko-studio-interaction']
+    expect(server.enabled).toBe(enabled)
+    if (enabled) expect(server.env.HERMES_MCP_USER_CLARIFICATION).toBe('0')
+    expect(Object.keys(migrated.data.mcp_servers)).toHaveLength(5)
+  })
+
+  it.each([false, true])('migrates Hermes split names without duplicates (new names already present: %s)', async (coexisting) => {
+    const { injectBundledMcpServer } = await import('../../packages/server/src/modules/hermes/services/mcp/studio-autoinject')
+    await injectBundledMcpServer()
+    const updater = updateConfigYamlForProfileMock.mock.calls[0][1]
+    const current = (await updater({})).data
+    for (const name of Object.keys(current.mcp_servers)) {
+      current.mcp_servers[name.replace(/^ekko-/, 'hermes-')] = current.mcp_servers[name]
+      if (!coexisting) delete current.mcp_servers[name]
+    }
+    current.mcp_servers['hermes-studio-api'].timeout = 123
+    current.mcp_servers.custom = { command: 'user-command' }
+    const migrated = await updater(current)
+    expect(migrated.result.status).toBe('updated')
+    expect(Object.keys(migrated.data.mcp_servers).some(name => name.startsWith('hermes-studio-'))).toBe(false)
+    expect(migrated.data.mcp_servers['ekko-studio-api'].timeout).toBe(123)
+    expect(migrated.data.mcp_servers.custom.command).toBe('user-command')
+    expect(Object.keys(migrated.data.mcp_servers)).toHaveLength(6)
+    const repeated = await updater(migrated.data)
+    expect(repeated.result.status).toBe('unchanged')
+    expect(repeated.write).toBe(false)
+  })
+
   it('respects a user-disabled managed MCP server entry', async () => {
     const { injectBundledMcpServer } = await import('../../packages/server/src/modules/hermes/services/mcp/studio-autoinject')
 
@@ -317,7 +386,7 @@ describe('studio MCP autoinject', () => {
 
     const updated = await updateConfigYamlForProfileMock.mock.calls[0][1]({
       mcp_servers: {
-        'hermes-studio-api': {
+        'ekko-studio-api': {
           command: process.execPath,
           args: [stableLauncher, 'api'],
           env: {
@@ -325,7 +394,7 @@ describe('studio MCP autoinject', () => {
             HERMES_WEB_UI_HOME: '/Users/test/.hermes-web-ui',
             HERMES_WEBUI_STATE_DIR: '/Users/test/.hermes-web-ui',
             HERMES_WEB_UI_PROFILE: 'default',
-            HERMES_MCP_SERVER_NAME: 'hermes-studio-api',
+            HERMES_MCP_SERVER_NAME: 'ekko-studio-api',
             HERMES_MCP_TOOLSET: 'api',
             HERMES_WEB_UI_MANAGED_MCP: '1',
           },
@@ -337,9 +406,9 @@ describe('studio MCP autoinject', () => {
     expect(updated.write).toBe(false)
     expect(updated.result).toMatchObject({
       status: 'skipped',
-      reason: 'existing hermes-studio-api MCP server is disabled by user',
+      reason: 'existing ekko-studio-api MCP server is disabled by user',
     })
-    expect(updated.data.mcp_servers['hermes-studio-api'].enabled).toBe(false)
+    expect(updated.data.mcp_servers['ekko-studio-api'].enabled).toBe(false)
   })
 
   it('cleans a disabled legacy managed MCP server entry before injecting split servers', async () => {
@@ -364,10 +433,10 @@ describe('studio MCP autoinject', () => {
       status: 'updated',
     })
     expect(updated.data.mcp_servers['hermes-studio']).toBeUndefined()
-    expect(updated.data.mcp_servers['hermes-studio-api']).toBeDefined()
-    expect(updated.data.mcp_servers['hermes-studio-browser']).toBeDefined()
-    expect(updated.data.mcp_servers['hermes-studio-devices']).toBeDefined()
-    expect(updated.data.mcp_servers['hermes-studio-use']).toBeDefined()
+    expect(updated.data.mcp_servers['ekko-studio-api']).toBeDefined()
+    expect(updated.data.mcp_servers['ekko-studio-browser']).toBeDefined()
+    expect(updated.data.mcp_servers['ekko-studio-devices']).toBeDefined()
+    expect(updated.data.mcp_servers['ekko-studio-use']).toBeDefined()
   })
 
   it('updates old managed PATH-only MCP entries to the bundled node script', async () => {
@@ -400,11 +469,11 @@ describe('studio MCP autoinject', () => {
     expect(updated.result.status).toBe('updated')
     expect(updated.data.mcp_servers['hermes-studio']).toBeUndefined()
     expect(updated.data.mcp_servers['hermes-web-ui-mcp']).toBeUndefined()
-    expect(updated.data.mcp_servers['hermes-studio-api'].command).toBe(process.execPath)
-    expect(updated.data.mcp_servers['hermes-studio-api'].args).toEqual([stableLauncher, 'api'])
-    expect(updated.data.mcp_servers['hermes-studio-browser'].args).toEqual([stableLauncher, 'browser'])
-    expect(updated.data.mcp_servers['hermes-studio-devices'].args).toEqual([stableLauncher, 'devices'])
-    expect(updated.data.mcp_servers['hermes-studio-use'].args).toEqual([stableLauncher, 'use'])
+    expect(updated.data.mcp_servers['ekko-studio-api'].command).toBe(process.execPath)
+    expect(updated.data.mcp_servers['ekko-studio-api'].args).toEqual([stableLauncher, 'api'])
+    expect(updated.data.mcp_servers['ekko-studio-browser'].args).toEqual([stableLauncher, 'browser'])
+    expect(updated.data.mcp_servers['ekko-studio-devices'].args).toEqual([stableLauncher, 'devices'])
+    expect(updated.data.mcp_servers['ekko-studio-use'].args).toEqual([stableLauncher, 'use'])
   })
 
   it('uses the desktop runtime node for bundled MCP servers when available', async () => {
@@ -415,17 +484,17 @@ describe('studio MCP autoinject', () => {
     await injectBundledMcpServer()
 
     const injected = await updateConfigYamlForProfileMock.mock.calls[0][1]({})
-    expect(injected.data.mcp_servers['hermes-studio-api'].command).toBe('/runtime/node')
-    expect(injected.data.mcp_servers['hermes-studio-api'].args).toEqual([
+    expect(injected.data.mcp_servers['ekko-studio-api'].command).toBe('/runtime/node')
+    expect(injected.data.mcp_servers['ekko-studio-api'].args).toEqual([
       stableLauncher, 'api',
     ])
-    expect(injected.data.mcp_servers['hermes-studio-browser'].args).toEqual([
+    expect(injected.data.mcp_servers['ekko-studio-browser'].args).toEqual([
       stableLauncher, 'browser',
     ])
-    expect(injected.data.mcp_servers['hermes-studio-devices'].args).toEqual([
+    expect(injected.data.mcp_servers['ekko-studio-devices'].args).toEqual([
       stableLauncher, 'devices',
     ])
-    expect(injected.data.mcp_servers['hermes-studio-use'].args).toEqual([
+    expect(injected.data.mcp_servers['ekko-studio-use'].args).toEqual([
       stableLauncher, 'use',
     ])
   })
@@ -437,7 +506,7 @@ describe('studio MCP autoinject', () => {
 
     const updated = await updateConfigYamlForProfileMock.mock.calls[0][1]({
       mcp_servers: {
-        'hermes-studio-api': {
+        'ekko-studio-api': {
           command: 'hermes-web-ui-mcp',
           args: ['api'],
           env: {
@@ -445,7 +514,7 @@ describe('studio MCP autoinject', () => {
             HERMES_WEB_UI_HOME: '/tmp/hermes-web-ui-home',
             HERMES_WEBUI_STATE_DIR: '/tmp/hermes-web-ui-home',
             HERMES_WEB_UI_PROFILE: 'default',
-            HERMES_MCP_SERVER_NAME: 'hermes-studio-api',
+            HERMES_MCP_SERVER_NAME: 'ekko-studio-api',
             HERMES_MCP_TOOLSET: 'api',
             HERMES_WEB_UI_MANAGED_MCP: '1',
             HERMES_WEB_UI_TOKEN: 'old-token',
@@ -455,7 +524,7 @@ describe('studio MCP autoinject', () => {
       },
     })
     expect(updated.result.status).toBe('updated')
-    expect(updated.data.mcp_servers['hermes-studio-api'].env.HERMES_WEB_UI_TOKEN).toBeUndefined()
+    expect(updated.data.mcp_servers['ekko-studio-api'].env.HERMES_WEB_UI_TOKEN).toBeUndefined()
   })
 
   it('skips an unmanaged existing server entry', async () => {

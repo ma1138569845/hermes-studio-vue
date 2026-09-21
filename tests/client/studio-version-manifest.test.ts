@@ -12,13 +12,14 @@ describe('Studio version manifest client', () => {
   it('loads the production Studio manifest', async () => {
     const manifest = {
       schema: 1 as const,
+      accessMode: 'paid' as const,
       hermes: ['0.20.4'],
       mobile: {
-        version: '1.0.0',
+        version: '1.0.1',
         channels: {
-          androidApk: { githubUrl: 'https://github.example/app.apk', cloudflareUrl: 'https://cf.example/app.apk', online: true },
-          googlePlay: { url: 'https://play.google.com/app', online: true },
-          apple: { testFlightUrl: 'https://testflight.apple.com/join/test', appStoreUrl: 'https://apps.apple.com/app/test', online: true },
+          androidApk: { version: '1.0.1', githubUrl: 'https://github.example/app.apk', cloudflareUrl: 'https://cf.example/app.apk', online: true },
+          googlePlay: { version: '1.0.2', url: 'https://play.google.com/app', online: true },
+          apple: { version: '1.1.0', testFlightUrl: 'https://testflight.apple.com/join/test', appStoreUrl: 'https://apps.apple.com/app/test', online: true },
           harmony: { url: 'https://appgallery.huawei.com/app/test', online: true },
         },
       },
@@ -27,10 +28,64 @@ describe('Studio version manifest client', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     await expect(fetchStudioVersionManifest()).resolves.toEqual(manifest)
-    expect(STUDIO_VERSION_MANIFEST_URL).toBe('https://api.hermes-studio.ai/api/studio/versions')
+    expect(STUDIO_VERSION_MANIFEST_URL).toBe('https://api.ekkostudio.xyz/api/studio/versions')
     expect(fetchMock).toHaveBeenCalledWith(STUDIO_VERSION_MANIFEST_URL, {
       headers: { Accept: 'application/json' },
     })
+  })
+
+  it('fills all channel versions from the legacy unified version', async () => {
+    const manifest = {
+      schema: 1 as const,
+      hermes: ['0.20.4'],
+      mobile: {
+        version: '1.0.0',
+        channels: {
+          androidApk: { githubUrl: '', cloudflareUrl: '', online: false },
+          googlePlay: { url: '', online: false },
+          apple: { testFlightUrl: '', appStoreUrl: '', online: false },
+          harmony: { url: '', online: false },
+        },
+      },
+    }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => manifest }))
+
+    const result = await fetchStudioVersionManifest()
+
+    expect(result).toMatchObject({
+      mobile: {
+        version: '1.0.0',
+        channels: {
+          androidApk: { version: '1.0.0' },
+          googlePlay: { version: '1.0.0' },
+          apple: { version: '1.0.0' },
+        },
+      },
+    })
+    expect(result.accessMode).toBeUndefined()
+  })
+
+  it('ignores an unknown access mode without rejecting valid version data', async () => {
+    const manifest = {
+      schema: 1 as const,
+      accessMode: 'unknown',
+      hermes: [],
+      mobile: {
+        version: '1.0.0',
+        channels: {
+          androidApk: { githubUrl: '', cloudflareUrl: '', online: false },
+          googlePlay: { url: '', online: false },
+          apple: { testFlightUrl: '', appStoreUrl: '', online: false },
+          harmony: { url: '', online: false },
+        },
+      },
+    }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => manifest }))
+
+    const result = await fetchStudioVersionManifest()
+
+    expect(result.accessMode).toBeUndefined()
+    expect(result.mobile.version).toBe('1.0.0')
   })
 
   it('rejects an invalid response', async () => {

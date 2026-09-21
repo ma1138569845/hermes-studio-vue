@@ -298,8 +298,10 @@ async function callAnthropicMessages(target: ClaudeCodeProxyTarget, body: any): 
   const result = await withCustomEncryptedContentRetry(target, body, nextBody => agentRunGateway.completeJson({
     url: anthropicMessagesUrl(target),
     apiKey: target.apiKey,
+    sessionId: target.chatSessionId || target.agentSessionId || target.routeKey,
+    provider: target.provider,
     headers: {
-      'x-api-key': target.apiKey,
+      ...(target.apiKey ? { 'x-api-key': target.apiKey } : {}),
       'anthropic-version': '2023-06-01',
     },
     body: anthropicRequestBody(nextBody, target),
@@ -316,6 +318,8 @@ async function callOpenAiChat(target: ClaudeCodeProxyTarget, body: any): Promise
   return agentRunGateway.completeJson({
     url: resolveChatCompletionsUrl(target.baseUrl),
     apiKey: target.apiKey,
+    sessionId: target.chatSessionId || target.agentSessionId || target.routeKey,
+    provider: target.provider,
     body: anthropicToOpenAiChat(body, target),
   })
 }
@@ -329,6 +333,8 @@ async function callOpenAiResponses(target: ClaudeCodeProxyTarget, body: any): Pr
   return agentRunGateway.completeJson({
     url: resolveResponsesUrl(target.baseUrl),
     apiKey: target.apiKey,
+    sessionId: target.chatSessionId || target.agentSessionId || target.routeKey,
+    provider: target.provider,
     body: anthropicToOpenAiResponses(body, target),
   })
 }
@@ -369,6 +375,8 @@ async function openAiChatToAnthropicSseStream(target: ClaudeCodeProxyTarget, bod
   const stream = await agentRunGateway.streamBytes({
     url: resolveChatCompletionsUrl(target.baseUrl),
     apiKey: target.apiKey,
+    sessionId: target.chatSessionId || target.agentSessionId || target.routeKey,
+    provider: target.provider,
     body: anthropicToOpenAiChat(body, target, true),
   })
   const [clientStream, observerStream] = teeAsyncIterable(stream)
@@ -386,8 +394,10 @@ async function anthropicMessagesSseStream(target: ClaudeCodeProxyTarget, body: a
   const request = (nextBody: any) => agentRunGateway.streamBytes({
     url: anthropicMessagesUrl(target),
     apiKey: target.apiKey,
+    sessionId: target.chatSessionId || target.agentSessionId || target.routeKey,
+    provider: target.provider,
     headers: {
-      'x-api-key': target.apiKey,
+      ...(target.apiKey ? { 'x-api-key': target.apiKey } : {}),
       'anthropic-version': '2023-06-01',
     },
     body: anthropicRequestBody(nextBody, target),
@@ -436,6 +446,8 @@ async function openAiResponsesToAnthropicSseStream(target: ClaudeCodeProxyTarget
   const stream = await agentRunGateway.streamBytes({
     url: resolveResponsesUrl(target.baseUrl),
     apiKey: target.apiKey,
+    sessionId: target.chatSessionId || target.agentSessionId || target.routeKey,
+    provider: target.provider,
     body: anthropicToOpenAiResponses(body, target, true),
   })
   const [clientStream, observerStream] = teeAsyncIterable(stream)

@@ -111,6 +111,7 @@ describe('EkkoConfigStore', () => {
     expect(config.runtime).toMatchObject({
       maxSteps: 17,
       maxModelRetries: DEFAULT_EKKO_CONFIG.runtime.maxModelRetries,
+      toolFailureRecoveryThreshold: DEFAULT_EKKO_CONFIG.runtime.toolFailureRecoveryThreshold,
       maxConsecutiveToolFailures: DEFAULT_EKKO_CONFIG.runtime.maxConsecutiveToolFailures,
     })
     expect(config.model).toMatchObject({
@@ -287,7 +288,7 @@ describe('EkkoConfigStore', () => {
       })
 
       setup.config.setMcpServer('remote-tools', {
-        type: 'streamable_http',
+        type: 'streamableHttp' as 'streamable_http',
         url: 'https://example.com/mcp',
         headers: { Authorization: 'Bearer test' },
         enabled: true,

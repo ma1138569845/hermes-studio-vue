@@ -37,7 +37,48 @@ export const USAGE_RUN_INDEX = `CREATE UNIQUE INDEX IF NOT EXISTS idx_session_us
 // Session Store (session-store.ts)
 // ============================================================================
 
+export const TASK_PLANS_TABLE = 'task_plans'
+export const TASK_PLANS_SCHEMA: Record<string, string> = {
+  session_id: 'TEXT NOT NULL',
+  plan_id: 'TEXT NOT NULL',
+  run_id: 'TEXT NOT NULL',
+  revision: 'INTEGER NOT NULL',
+  execution_state: 'TEXT NOT NULL',
+  snapshot: 'TEXT NOT NULL',
+  created_at: 'INTEGER NOT NULL',
+}
+
 export const SESSIONS_TABLE = 'sessions'
+
+export const SESSION_SHARES_TABLE = 'session_shares'
+export const SESSION_SHARES_SCHEMA: Record<string, string> = {
+  id: 'TEXT PRIMARY KEY',
+  session_id: 'TEXT NOT NULL',
+  profile: 'TEXT NOT NULL',
+  created_by_user_id: 'INTEGER NOT NULL',
+  sharer_app_user_id: 'INTEGER NOT NULL',
+  sharer_name_snapshot: 'TEXT NOT NULL',
+  recipient_app_user_id: 'INTEGER',
+  recipient_name_snapshot: 'TEXT',
+  token_hash: 'TEXT NOT NULL',
+  permissions: 'TEXT NOT NULL',
+  workspace_root: 'TEXT NOT NULL',
+  // Allow existing tables to migrate. Legacy grants without a pinned real path
+  // remain unable to access workspace files until a new share is created.
+  workspace_real_root: "TEXT NOT NULL DEFAULT ''",
+  extra_paths: "TEXT NOT NULL DEFAULT '[]'",
+  policy_version: 'INTEGER NOT NULL DEFAULT 1',
+  created_at: 'INTEGER NOT NULL',
+  updated_at: 'INTEGER NOT NULL',
+  expires_at: 'INTEGER NOT NULL',
+  claimed_at: 'INTEGER',
+  revoked_at: 'INTEGER',
+}
+export const SESSION_SHARES_INDEXES = {
+  uniq_session_shares_token: 'CREATE UNIQUE INDEX IF NOT EXISTS uniq_session_shares_token ON session_shares(token_hash)',
+  idx_session_shares_sender: 'CREATE INDEX IF NOT EXISTS idx_session_shares_sender ON session_shares(session_id, sharer_app_user_id, created_at)',
+  idx_session_shares_recipient: 'CREATE INDEX IF NOT EXISTS idx_session_shares_recipient ON session_shares(recipient_app_user_id)',
+}
 
 export const SESSION_CATEGORIES_TABLE = 'session_categories'
 
@@ -58,6 +99,7 @@ export const SESSIONS_SCHEMA: Record<string, string> = {
   source: 'TEXT NOT NULL DEFAULT \'api_server\'',
   agent: 'TEXT NOT NULL DEFAULT \'\'',
   agent_mode: 'TEXT NOT NULL DEFAULT \'\'',
+  agent_preset: 'TEXT NOT NULL DEFAULT \'\'',
   agent_session_id: 'TEXT NOT NULL DEFAULT \'\'',
   agent_native_session_id: 'TEXT NOT NULL DEFAULT \'\'',
   user_id: 'TEXT',
@@ -85,7 +127,8 @@ export const SESSIONS_SCHEMA: Record<string, string> = {
   preview: 'TEXT NOT NULL DEFAULT \'\'',
   last_active: 'INTEGER NOT NULL',
   is_archived: 'INTEGER NOT NULL DEFAULT 0',
-  push_enabled: 'INTEGER NOT NULL DEFAULT 0',
+  is_pinned: 'INTEGER NOT NULL DEFAULT 0',
+  push_enabled: 'INTEGER NOT NULL DEFAULT 1',
   workspace: 'TEXT',
   category_id: 'INTEGER',
   history_revision: 'INTEGER NOT NULL DEFAULT 0',
@@ -272,6 +315,7 @@ export const WORKFLOW_RUNS_TABLE = 'workflow_runs'
 export const WORKFLOW_RUNS_SCHEMA: Record<string, string> = {
   id: 'TEXT PRIMARY KEY',
   workflow_id: 'TEXT NOT NULL',
+  user_id: 'INTEGER',
   profile: "TEXT NOT NULL DEFAULT 'default'",
   workspace: 'TEXT',
   start_node_ids_json: "TEXT NOT NULL DEFAULT '[]'",
@@ -570,6 +614,7 @@ export const APP_CONNECTIONS_SCHEMA: Record<string, string> = {
   device_model: "TEXT NOT NULL DEFAULT ''",
   connection_type: "TEXT NOT NULL DEFAULT 'lan'",
   user_id: 'INTEGER NOT NULL',
+  push_enabled: 'INTEGER NOT NULL DEFAULT 1',
   cloud_user_id: 'INTEGER NOT NULL DEFAULT 0',
   token_hash: "TEXT NOT NULL DEFAULT ''",
   token_expires_at: 'INTEGER NOT NULL DEFAULT 0',
@@ -911,6 +956,7 @@ export const GC_ROOM_AGENTS_SCHEMA: Record<string, string> = {
   model: "TEXT NOT NULL DEFAULT ''",
   apiMode: "TEXT NOT NULL DEFAULT ''",
   reasoningEffort: "TEXT NOT NULL DEFAULT ''",
+  agentPreset: "TEXT NOT NULL DEFAULT ''",
   name: 'TEXT NOT NULL',
   description: "TEXT NOT NULL DEFAULT ''",
   avatar: "TEXT NOT NULL DEFAULT ''",
@@ -934,6 +980,7 @@ export const GC_AGENT_PRESETS_SCHEMA: Record<string, string> = {
   model: 'TEXT NOT NULL',
   apiMode: "TEXT NOT NULL DEFAULT ''",
   reasoningEffort: "TEXT NOT NULL DEFAULT ''",
+  agentPreset: "TEXT NOT NULL DEFAULT ''",
   name: 'TEXT NOT NULL',
   description: "TEXT NOT NULL DEFAULT ''",
   avatar: "TEXT NOT NULL DEFAULT ''",
@@ -1504,6 +1551,13 @@ export function initAllHermesTables(): void {
     syncTable(SESSION_CATEGORIES_TABLE, SESSION_CATEGORIES_SCHEMA, {
       indexes: SESSION_CATEGORIES_INDEXES,
     })
+    syncTable(TASK_PLANS_TABLE, TASK_PLANS_SCHEMA, {
+      indexes: {
+        idx_task_plans_identity: 'CREATE UNIQUE INDEX IF NOT EXISTS idx_task_plans_identity ON task_plans(session_id, plan_id)',
+        idx_task_plans_run: 'CREATE INDEX IF NOT EXISTS idx_task_plans_run ON task_plans(session_id, run_id)',
+        idx_task_plans_latest: 'CREATE INDEX IF NOT EXISTS idx_task_plans_latest ON task_plans(session_id, created_at DESC)',
+      },
+    })
     syncTable(SESSIONS_TABLE, SESSIONS_SCHEMA, {
       indexes: SESSIONS_INDEXES,
     })
@@ -1587,6 +1641,8 @@ export function initAllHermesTables(): void {
     })
 
     // App authorization codes and connected mobile devices
+    syncTable(SESSION_SHARES_TABLE, SESSION_SHARES_SCHEMA, { indexes: SESSION_SHARES_INDEXES })
+    createIndexes(db, SESSION_SHARES_INDEXES)
     syncTable(APP_CONNECTIONS_TABLE, APP_CONNECTIONS_SCHEMA, {
       indexes: APP_CONNECTIONS_INDEXES,
     })

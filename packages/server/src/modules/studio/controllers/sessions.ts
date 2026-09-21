@@ -1,3 +1,8 @@
+import { businessEvents } from '../services/webhooks/business-events'
+import { ensureBusinessConsumers } from '../services/webhooks/business-consumers'
+import { authorizeSessionShare } from '../services/session-shares/access'
+import { sessionShareService } from '../services/session-shares/service'
+import { getSessionTaskPlans } from '../services/task-plans'
 import {
   deleteHermesSessionForProfile,
   getHermesCliSession,
@@ -11,9 +16,11 @@ import {
   listHermesSessionSummaryGroups,
   notifyHermesSessionModelChanged,
   stopCodingAgentSessionRun,
+  invalidateCodingAgentSessionRuntime,
 } from '../public/session-agent-runtime'
 import {
   listSessions as localListSessions,
+  countSessions as localCountSessions,
   searchSessions as localSearchSessions,
   getSession as localGetSession,
   getSessionDetail as localGetSessionDetail,
@@ -21,6 +28,7 @@ import {
   renameSession as localRenameSession,
   setSessionArchived as localSetSessionArchived,
   setSessionPushEnabled as localSetSessionPushEnabled,
+  setSessionPinned as localSetSessionPinned,
   createSession as localCreateSession,
   addMessages as localAddMessages,
   updateSession as localUpdateSession,
@@ -42,24 +50,29 @@ import {
 import type { UsageStatsAgentRow, UsageStatsModelRow, UsageStatsDailyRow } from '../public/sessions'
 import { deleteWorkspaceRunChangesForSession, getWorkspaceRunChangeFile as getWorkspaceRunChangeFileFromDb, listWorkspaceRunChangesForAssistantMessages, listWorkspaceRunChangesForSession } from '../public/sessions'
 import { getActiveProfileDir, getActiveProfileName, getProfileDir, listProfileNamesFromDisk, readConfigYamlForProfile } from '../public/profile-config'
-import { isNearestExistingRealPathWithin, isPathWithin, relativePathFromBase, validatePath } from '../services/files/path'
+import { isNearestExistingRealPathWithin, isPathWithin, relativePathFromBase } from '../services/files/path'
 import {
   isWorkspaceListPathAllowed,
   normalizeWindowsWorkspacePath,
   useWindowsDriveWorkspaceMode,
-  workspaceBaseOverride,
 } from '../services/files/workspace-path'
 import { getGroupChatServer } from './group-chat'
 import { logger } from '../public/logging'
 import { isHermesAgentAvailable } from '../public/agent-status-registry'
 import { listUserProfiles } from '../public/users'
-import { defaultHermesWorkspace, ensureHermesRunWorkspace } from '../services/chat-run/workspace'
+import { ensureHermesRunWorkspace } from '../services/chat-run/workspace'
+import {
+  isAbsoluteWorkspacePath,
+  resolveWorkspacePath,
+  workspaceBaseDirectory,
+  workspaceRelativePath,
+} from '../services/workspace/manager'
 import { getChatRunServer } from '../services/chat-run/server-registry'
 import { isSensitivePath, MAX_DOWNLOAD_SIZE, MAX_EDIT_SIZE } from '../services/files/file-policy'
 import { buildFileContentHeaders, getFilePreviewDescriptor } from '../services/files/file-preview'
 import { decorateWorkspaceEntries, getWorkspaceFileGitDiff } from '../services/files/workspace-git-status'
 import { copyFile, mkdir, readFile, readdir, rename as fsRename, rm as fsRm, stat as fsStat, writeFile } from 'fs/promises'
-import { relative, normalize as pathNormalize, resolve as pathResolve } from 'path'
+import { normalize as pathNormalize, resolve as pathResolve } from 'path'
 
 function getPendingDeletedSessionIds(): Set<string> {
   return getGroupChatServer()?.getStorage().getPendingDeletedSessionIds() || new Set<string>()
@@ -192,6 +205,7 @@ function mergeHermesHistorySessions(
   for (const [id, session] of historySessionsById) {
     const localSession = localSessionsById.get(id)
     if (localSession?.is_archived != null) session.is_archived = localSession.is_archived
+    session.is_pinned = Number(localSession?.is_pinned || 0)
     session.push_enabled = Number(localSession?.push_enabled || 0) !== 0 ? 1 : 0
   }
 
@@ -213,6 +227,7 @@ function isCodingAgentSession(session?: { source?: string | null; agent?: string
     session?.agent === 'codex' ||
     session?.agent === 'pi' ||
     session?.agent === 'grok' ||
+    session?.agent === 'opencode' ||
     Boolean(session?.agent_session_id)
 }
 
@@ -404,6 +419,7 @@ export async function listConversations(ctx: any) {
     agent_mode: s.agent_mode,
     agent_session_id: s.agent_session_id,
     agent_native_session_id: s.agent_native_session_id,
+    agent_preset: s.agent_preset,
     model: s.model,
     provider: s.provider,
     api_mode: s.api_mode,
@@ -467,23 +483,50 @@ export async function list(ctx: any) {
   const limit = ctx.query.limit ? parseInt(ctx.query.limit as string, 10) : undefined
   const profile = explicitProfileFilter(ctx)
   const effectiveLimit = limit && limit > 0 ? limit : 2000
+  const paginated = ctx.query.offset !== undefined
+  const requestedOffset = Number(ctx.query.offset)
+  const offset = Number.isSafeInteger(requestedOffset) && requestedOffset > 0 ? requestedOffset : 0
+  const category = ctx.query.category
+  const categoryId = category === 'none' ? null : category === undefined || category === 'pinned' ? undefined : Number(category)
+  if (categoryId !== undefined && categoryId !== null && (!Number.isSafeInteger(categoryId) || categoryId <= 0)) {
+    ctx.status = 400
+    ctx.body = { error: 'category must be a positive integer, none, or pinned' }
+    return
+  }
+  const readIds = (raw: unknown): string[] => (Array.isArray(raw) ? raw : raw ? [raw] : [])
+    .map(value => String(value).trim()).filter(Boolean)
+  const includedIds = ctx.query.include === undefined ? undefined : readIds(ctx.query.include)
+  const excludedIds = readIds(ctx.query.exclude)
 
   const knownProfiles = profile ? null : new Set(listProfileNamesFromDisk())
   const allowedProfiles = allowedProfileSet(ctx)
   const visibleProfiles = knownProfiles
     ? [...knownProfiles].filter(name => !allowedProfiles || allowedProfiles.has(name))
     : undefined
-  const allSessions = localListSessions(profile, source, effectiveLimit, {
+  const listOptions = {
+    ...(category === 'pinned' || ctx.query.pinned === 'true' ? { pinned: true } : ctx.query.pinned === 'false' ? { pinned: false } : {}),
+    ...(categoryId !== undefined ? { categoryId } : {}),
+    ...(includedIds !== undefined ? { includeSessionIds: includedIds } : {}),
     sources: source ? undefined : requestedSessionSources(),
     profiles: visibleProfiles,
     includeArchived: false,
-    excludeSessionIds: [...getPendingDeletedSessionIds()],
+    excludeSessionIds: [...getPendingDeletedSessionIds(), ...excludedIds],
+  }
+  const allSessions = localListSessions(profile, source, effectiveLimit + (paginated ? 1 : 0), {
+    ...listOptions,
+    ...(paginated ? { offset } : {}),
   })
-  ctx.body = {
-    sessions: filterPendingDeletedSessions(filterArchivedSessions(filterByAllowedProfiles(ctx, allSessions).filter(s =>
+  const sessions = filterPendingDeletedSessions(filterArchivedSessions(filterByAllowedProfiles(ctx, allSessions).filter(s =>
       isRequestedSessionSource(source, s.source) &&
       (!knownProfiles || knownProfiles.has(s.profile || 'default')),
-    ))),
+    )))
+  ctx.body = {
+    sessions: paginated ? sessions.slice(0, effectiveLimit) : sessions,
+    ...(paginated ? {
+      hasMore: sessions.length > effectiveLimit, offset, limit: effectiveLimit,
+      total: profile && allowedProfiles && !allowedProfiles.has(profile)
+        ? 0 : localCountSessions(profile, source, listOptions),
+    } : {}),
   }
 }
 
@@ -652,7 +695,7 @@ export async function listHermesSessionGroups(ctx: any) {
     })
   }
 
-  const localIncluded = localSessions.filter(session => includedIds.includes(session.id))
+  const localIncluded = localSessions.filter(session => session.is_pinned || includedIds.includes(session.id))
   const included = mergeHermesHistorySessions(ctx, profile, hermesResult.included, localIncluded)
   ctx.body = { groups, included }
 }
@@ -694,6 +737,9 @@ export async function get(ctx: any) {
     return
   }
   if (denySessionAccess(ctx, session)) return
+  if (ctx.state?.sessionShare) {
+    delete session.parent_title; delete session.parent_last_message; delete session.parent_last_message_role
+  }
   ctx.body = { session }
 }
 
@@ -728,6 +774,13 @@ export async function getWorkspaceRunChangeFile(ctx: any) {
     ctx.body = { error: 'Workspace change file not found' }
     return
   }
+  if (ctx.state?.sessionShare) {
+    const access = ctx.state.sessionShare
+    const change = listWorkspaceRunChangesForSession(ctx.params.id).find(item => item.change_id === ctx.params.changeId)
+    if (!change || pathResolve(change.workspace) !== access.share.workspace_root) { ctx.status = 403; ctx.body = { error: 'share_workspace_changed' }; return }
+    await sessionShareService.authorizePath(access.token, access.actor, 'workspaceRead', file.path)
+    if (file.old_path) await sessionShareService.authorizePath(access.token, access.actor, 'workspaceRead', file.old_path)
+  }
   ctx.body = { file }
 }
 
@@ -735,18 +788,7 @@ function normalizeWorkspaceRelativePath(value: unknown, options: { allowEmpty?: 
   const raw = typeof value === 'string' ? value.trim() : ''
   if (!raw && options.allowEmpty) return ''
   if (!raw) throw Object.assign(new Error('Missing path parameter'), { code: 'missing_path', status: 400 })
-  if (raw.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(raw)) {
-    throw Object.assign(new Error('Invalid file path'), { code: 'invalid_path', status: 400 })
-  }
-  const normalized = pathNormalize(raw).replace(/\\/g, '/')
-  if (normalized === '..' || normalized.startsWith('../') || normalized.includes('/../')) {
-    throw Object.assign(new Error('Invalid file path'), { code: 'invalid_path', status: 400 })
-  }
-  return normalized
-}
-
-function workspaceRelativePath(workspace: string, fullPath: string): string {
-  return relative(workspace, fullPath).replace(/\\/g, '/')
+  return isAbsoluteWorkspacePath(raw) ? raw : pathNormalize(raw).replace(/\\/g, '/')
 }
 
 function sessionWorkspacePrefix(workspace: string, profile?: string | null): string {
@@ -777,12 +819,16 @@ async function resolveSessionWorkspacePath(
   if (denySessionAccess(ctx, session)) throw Object.assign(new Error('Forbidden'), { code: 'forbidden', status: 403, handled: true })
   const workspace = String(session.workspace || '').trim()
   if (!workspace) throw Object.assign(new Error('Session workspace not found'), { code: 'workspace_not_found', status: 404 })
-  const relativePath = normalizeSessionWorkspaceRelativePath(workspace, session.profile, relativePathValue, options)
-  const fullPath = pathResolve(workspace, relativePath)
-  if (!isPathWithin(fullPath, workspace) || !await isNearestExistingRealPathWithin(fullPath, workspace)) {
-    throw Object.assign(new Error('Invalid file path'), { code: 'invalid_path', status: 400 })
-  }
-  return { session, relativePath, fullPath, workspace }
+  const path = normalizeSessionWorkspaceRelativePath(workspace, session.profile, relativePathValue, options)
+  const resolved = await resolveWorkspacePath(workspace, path, {
+    access: 'unrestricted',
+    allowAbsolute: true,
+    allowEmpty: options.allowEmpty,
+    missingWorkspaceMessage: 'Session workspace not found',
+  })
+  const shareAccess = ctx.state?.sessionShare
+  if (shareAccess) await sessionShareService.authorizePath(shareAccess.token, shareAccess.actor, ctx.state.sessionShareFileAction || 'workspaceRead', resolved.fullPath)
+  return { session, ...resolved }
 }
 
 async function resolveSessionWorkspaceFile(ctx: any, relativePathValue: unknown) {
@@ -790,35 +836,7 @@ async function resolveSessionWorkspaceFile(ctx: any, relativePathValue: unknown)
 }
 
 async function resolveSessionPreviewFile(ctx: any, pathValue: unknown) {
-  const rawPath = typeof pathValue === 'string' ? pathValue.trim() : ''
-  const isAbsolutePath = rawPath.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(rawPath)
-  if (!isAbsolutePath) return resolveSessionWorkspaceFile(ctx, pathValue)
-
-  const session = localGetSession(ctx.params.id)
-  if (!session) throw Object.assign(new Error('Session not found'), { code: 'not_found', status: 404 })
-  if (denySessionAccess(ctx, session)) throw Object.assign(new Error('Forbidden'), { code: 'forbidden', status: 403, handled: true })
-
-  const fullPath = validatePath(rawPath)
-  const roots = [
-    String(session.workspace || '').trim(),
-    defaultHermesWorkspace(String(session.profile || 'default')),
-  ].filter(Boolean)
-
-  for (const root of roots) {
-    if (isPathWithin(fullPath, root) && await isNearestExistingRealPathWithin(fullPath, root)) {
-      return {
-        session,
-        relativePath: workspaceRelativePath(root, fullPath),
-        fullPath,
-        workspace: root,
-      }
-    }
-  }
-
-  throw Object.assign(new Error('File is outside the session and Hermes workspaces'), {
-    code: 'invalid_path',
-    status: 400,
-  })
+  return resolveSessionWorkspaceFile(ctx, pathValue)
 }
 
 function handleWorkspaceFileError(ctx: any, err: any): void {
@@ -838,7 +856,14 @@ export async function listWorkspaceFiles(ctx: any) {
       return
     }
     const entries = await readdir(fullPath, { withFileTypes: true })
-    const mapped = await Promise.all(entries.map(async entry => {
+    const visibleEntries = ctx.state?.sessionShare ? (await Promise.all(entries.map(async entry => {
+      const access = ctx.state.sessionShare
+      try {
+        await sessionShareService.authorizePath(access.token, access.actor, 'workspaceRead', pathResolve(fullPath, entry.name))
+        return entry
+      } catch { return null }
+    }))).filter((entry): entry is typeof entries[number] => entry !== null) : entries
+    const mapped = await Promise.all(visibleEntries.map(async entry => {
       const entryFullPath = pathResolve(fullPath, entry.name)
       const stat = await fsStat(entryFullPath)
       return {
@@ -1439,6 +1464,28 @@ export async function unarchive(ctx: any) {
   ctx.body = { ok: true }
 }
 
+export async function setPinned(ctx: any) {
+  const existing = localGetSession(ctx.params.id)
+  if (!existing) {
+    ctx.status = 404
+    ctx.body = { error: 'Session not found' }
+    return
+  }
+  if (denySessionAccess(ctx, existing)) return
+  const { is_pinned } = ctx.request.body || {}
+  if (typeof is_pinned !== 'boolean') {
+    ctx.status = 400
+    ctx.body = { error: 'is_pinned must be a boolean' }
+    return
+  }
+  if (!localSetSessionPinned(ctx.params.id, is_pinned)) {
+    ctx.status = 500
+    ctx.body = { error: 'Failed to update session pin' }
+    return
+  }
+  ctx.body = { ok: true, is_pinned }
+}
+
 export async function setPushEnabled(ctx: any) {
   const existing = localGetSession(ctx.params.id)
   if (!existing) {
@@ -1460,6 +1507,12 @@ export async function setPushEnabled(ctx: any) {
     ctx.body = { error: 'Failed to update session push setting' }
     return
   }
+  if (!rawEnabled) {
+    ensureBusinessConsumers()
+    businessEvents.publish({ schema_version: 1, id: `push-disabled:${ctx.params.id}:${Date.now()}`,
+      type: 'chat.push.disabled', source: 'chat', profile: existing.profile || 'default',
+      occurred_at: new Date().toISOString(), subject: { session_id: ctx.params.id }, payload: {} })
+  }
   getChatRunServer()?.emitSessionSettingsUpdated(ctx.params.id, {
     push_enabled: rawEnabled,
   })
@@ -1477,6 +1530,7 @@ export async function setWorkspace(ctx: any) {
   const id = ctx.params.id
   const existing = getSession(id)
   if (denySessionAccess(ctx, existing)) return
+  if (ctx.state?.sessionShare) sessionShareService.authorizeWorkspaceSwitch(ctx.state.sessionShare.token, ctx.state.sessionShare.actor, workspace)
   if (!existing) {
     createSession({ id, profile: requestedProfile(ctx) || 'default', title: '' })
   }
@@ -1555,7 +1609,9 @@ export async function setModel(ctx: any) {
   if (!existing) {
     createSession({ id, profile, title: '', model: cleanModel, provider: cleanProvider, api_mode: cleanApiMode || '', reasoning_effort: '', workspace })
   }
-  const updates: Record<string, string> = { model: cleanModel, provider: cleanProvider, reasoning_effort: '' }
+  const updates: Record<string, string> = { model: cleanModel, provider: cleanProvider }
+  // A model-only share grant must never overwrite a concurrent reasoning update.
+  if (!ctx.state?.sessionShare) updates.reasoning_effort = ''
   if (cleanApiMode) updates.api_mode = cleanApiMode
   else if (codingAgentSession && existing && existing.provider !== cleanProvider) updates.api_mode = ''
   if (!codingAgentSession && existing && !existing.workspace && workspace) updates.workspace = workspace
@@ -1566,12 +1622,13 @@ export async function setModel(ctx: any) {
   ) {
     updates.agent_native_session_id = ''
   }
+  if (ctx.state?.sessionShare) authorizeSessionShare(ctx.state.sessionShare, 'switchModel', id)
   updateSession(id, updates as any)
   getChatRunServer()?.emitSessionSettingsUpdated(id, {
     model: cleanModel,
     provider: cleanProvider,
     api_mode: updates.api_mode ?? existing?.api_mode ?? '',
-    reasoning_effort: '',
+    reasoning_effort: updates.reasoning_effort ?? getSession(id)?.reasoning_effort ?? '',
   })
   if (!codingAgentSession) {
     await notifyBridgeSessionModelChanged(id, cleanModel, cleanProvider, profile)
@@ -1604,6 +1661,7 @@ export async function setReasoningEffort(ctx: any) {
   }
 
   localUpdateSession(id, { reasoning_effort: reasoningEffort })
+  if (existing.agent === 'grok') invalidateCodingAgentSessionRuntime(id)
   getChatRunServer()?.emitSessionSettingsUpdated(id, {
     reasoning_effort: reasoningEffort,
   })
@@ -1757,7 +1815,6 @@ export async function listWorkspaceFolders(ctx: any) {
   const { resolve, join, win32 } = await import('path')
   const { readdir, stat } = await import('fs/promises')
   const { existsSync } = await import('fs')
-  const { homedir } = await import('os')
 
   const subPath = (ctx.query.path as string) || ''
   if (useWindowsDriveWorkspaceMode()) {
@@ -1808,7 +1865,7 @@ export async function listWorkspaceFolders(ctx: any) {
     return
   }
 
-  const WORKSPACE_BASE = workspaceBaseOverride() || homedir()
+  const WORKSPACE_BASE = workspaceBaseDirectory()
 
   // Security: prevent path traversal
   const fullPath = resolve(join(WORKSPACE_BASE, subPath))
@@ -1862,7 +1919,6 @@ function invalidWorkspaceFolderName(name: string): boolean {
 
 async function resolveWorkspaceFolderPath(ctx: any, inputPath: string) {
   const { resolve, join } = await import('path')
-  const { homedir } = await import('os')
   if (useWindowsDriveWorkspaceMode()) {
     const resolved = normalizeWindowsWorkspacePath(inputPath)
     if (!resolved) {
@@ -1873,7 +1929,7 @@ async function resolveWorkspaceFolderPath(ctx: any, inputPath: string) {
     return resolved
   }
 
-  const WORKSPACE_BASE = workspaceBaseOverride() || homedir()
+  const WORKSPACE_BASE = workspaceBaseDirectory()
   const fullPath = resolve(join(WORKSPACE_BASE, inputPath || ''))
   if (!isPathWithin(fullPath, WORKSPACE_BASE)) {
     ctx.status = 403
@@ -2018,6 +2074,14 @@ export async function exportSession(ctx: any) {
   }
   if (denySessionAccess(ctx, session)) return
 
+  if (ctx.state?.sessionShare) {
+    delete session.parent_title; delete session.parent_last_message; delete session.parent_last_message_role
+    if (mode === 'compressed') {
+      const access = ctx.state.sessionShare
+      sessionShareService.authorize(access.token, access.actor, 'input', session.id)
+    }
+  }
+
   const ext = (ctx.query.ext as string) || (mode === 'compressed' ? 'txt' : 'json')
   const title = session.title || 'session'
   const safeName = title.replace(/[^a-zA-Z0-9一-鿿_-]/g, '_').slice(0, 50)
@@ -2103,12 +2167,16 @@ export async function getConversationMessagesPaginated(ctx: any) {
       profile: session.profile,
       source: session.source,
       model: session.model,
+      agent: (session as any).agent,
+      agent_mode: (session as any).agent_mode,
+      coding_agent_id: (session as any).coding_agent_id,
+      workspace: (session as any).workspace || null,
       title: session.title,
       parent_session_id: (session as any).parent_session_id,
       fork_point_message_id: (session as any).fork_point_message_id,
-      parent_title: (session as any).parent_title,
-      parent_last_message: (session as any).parent_last_message,
-      parent_last_message_role: (session as any).parent_last_message_role,
+      parent_title: ctx.state?.sessionShare ? undefined : (session as any).parent_title,
+      parent_last_message: ctx.state?.sessionShare ? undefined : (session as any).parent_last_message,
+      parent_last_message_role: ctx.state?.sessionShare ? undefined : (session as any).parent_last_message_role,
       started_at: session.started_at,
       ended_at: session.ended_at,
       last_active: session.last_active,
@@ -2118,6 +2186,7 @@ export async function getConversationMessagesPaginated(ctx: any) {
       output_tokens: session.output_tokens,
     },
     messages: result.messages,
+    taskPlans: getSessionTaskPlans(ctx.params.id, result.messages, offset === 0),
     workspaceRunChanges: listWorkspaceRunChangesForAssistantMessages(ctx.params.id, assistantMessageIds),
     total: result.total,
     offset: result.offset,
